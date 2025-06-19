@@ -1,6 +1,6 @@
 ![Leave Automation Banner](banner-leave-automation.png)
 
-# 🏝️ Leave & Vacation Automation Platform – Powered by n8n, PocketBase & Docker
+# eave & Vacation Automation Platform – Powered by n8n, PocketBase & Docker
 
 [![Build Status](https://img.shields.io/badge/Live-Demo-Pending-lightgray?style=flat-square)](#)
 [![Tech Stack](https://img.shields.io/badge/Stack-n8n%20%2B%20PocketBase%20%2B%20Docker-blueviolet?style=flat-square)](#)
@@ -180,4 +180,26 @@ This uses:
 
 ---
 
+##  Folder Structure 📁
+
+```bash
+n8n-automation/
+├── .env                     #  Production secrets and runtime configs
+├── backups/                 #  Compressed `.tar.gz` backups (auto-generated)
+├── backup_all.sh            #  Cron-based daily backup script
+├── restore.sh               #  Interactive restore script
+├── docker-compose.yml       #  Main Docker compose file
+├── docker-n8n/              # 🛠️ustom Dockerfile for n8n
+├── docker-pb/               # 🛠️ustom Dockerfile for PocketBase
+├── pb-webhook-bridge/       #  Realtime PocketBase → n8n webhook listener
+│   └── index.cjs            # → Auth + EventSource-based bridge logic
+├── n8n_data/                #  Persistent volume for n8n
+├── pocketbase-data/         #  Persistent volume for PocketBase
+├── pocketbase-logs/         #  PocketBase logs (optional)
+├── pb_migrations/           #  Migration scripts (if needed)
+├── settings_import.json     #  Exported n8n settings (optional)
+└── banner-leave-automation.png # 🖼️ GitHub banner (Leave & Vacation themed)
+```
+
+---
 
