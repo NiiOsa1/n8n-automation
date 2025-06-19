@@ -1,6 +1,6 @@
 ![Leave Automation Banner](banner-leave-automation.png)
 
-# eave & Vacation Automation Platform – Powered by n8n, PocketBase & Docker
+# Leave & Vacation Automation Platform – Powered by n8n, PocketBase & Docker
 
 [![Build Status](https://img.shields.io/badge/Live-Demo-Pending-lightgray?style=flat-square)](#)
 [![Tech Stack](https://img.shields.io/badge/Stack-n8n%20%2B%20PocketBase%20%2B%20Docker-blueviolet?style=flat-square)](#)
@@ -189,8 +189,8 @@ n8n-automation/
 ├── backup_all.sh            #  Cron-based daily backup script
 ├── restore.sh               #  Interactive restore script
 ├── docker-compose.yml       #  Main Docker compose file
-├── docker-n8n/              # 🛠️ustom Dockerfile for n8n
-├── docker-pb/               # 🛠️ustom Dockerfile for PocketBase
+├── docker-n8n/              # 🛠️Custom Dockerfile for n8n
+├── docker-pb/               # 🛠️Custom Dockerfile for PocketBase
 ├── pb-webhook-bridge/       #  Realtime PocketBase → n8n webhook listener
 │   └── index.cjs            # → Auth + EventSource-based bridge logic
 ├── n8n_data/                #  Persistent volume for n8n
@@ -198,8 +198,60 @@ n8n-automation/
 ├── pocketbase-logs/         #  PocketBase logs (optional)
 ├── pb_migrations/           #  Migration scripts (if needed)
 ├── settings_import.json     #  Exported n8n settings (optional)
-└── banner-leave-automation.png # 🖼️ GitHub banner (Leave & Vacation themed)
+└── banner-leave-automation.png # itHub banner (Leave & Vacation themed)
 ```
 
 ---
 
+## Security & Backups 🔐
+
+This automation stack is designed for resilience and confidentiality, offering both passive protection and proactive recovery:
+
+✅ .env Lockdown
+
+- Secrets like credentials and encryption keys are stored in .env
+
+- Enforced permissions with chmod 600 .env restrict access
+
+✅ Basic Authentication
+
+- n8n is protected via HTTP Basic Auth:
+
+```bash
+N8N_BASIC_AUTH_ACTIVE=true
+N8N_BASIC_AUTH_USER=admin
+N8N_BASIC_AUTH_PASSWORD=supersecurepassword
+```
+
+✅ Webhook Safety
+
+- Production webhooks bypass public authentication safely:
+
+```bash
+N8N_DISABLE_PRODUCTION_MAIN_WEBHOOK_AUTHENTICATION=true
+```
+
+🔁 Automated Daily Backups
+
+- Cron job runs backup_all.sh every day at 2:00 AM:
+
+```bash
+0 2 * * * /home/ubuntu/n8n-automation/backup_all.sh
+```
+
+- Backups saved in /backups/ and auto-cleaned after 7 days
+
+♻️ One-Step Restore
+
+```restore.sh``` handles recovery:
+
+- Lists backups
+
+- Restores volumes
+
+- Restarts services
+
+
+Health Monitoring
+
+- Docker healthcheck auto-detects failure and self-heals both n8n and PocketBase containers
