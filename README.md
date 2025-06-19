@@ -133,8 +133,51 @@ docker --version
 docker compose version
 ```
 
-5️⃣ Start All Services
+---
 
+## Docker Usage 🐳
+
+✅ Start Services (Production Mode)
+ 
 ```bash
 docker compose --env-file .env up -d --build
 ```
+
+🔁 Stop & Restart Cleanly
+
+```bash
+docker compose down
+docker compose --env-file .env up -d --force-recreate
+```
+
+🔍 Health Status
+
+```bash
+docker ps
+docker inspect <container_id>
+```
+
+🛠️ Rebuild Only n8n
+
+```bash
+docker compose build n8n
+docker compose restart n8n
+```
+
+🧪 Spin Up Demo/Test Instance
+
+```bash
+docker compose --env-file .env.demo -f docker-compose.demo.yml up -d --build
+```
+
+This uses:
+
+- .env.demo (safe creds)
+
+- docker-compose.demo.yml (custom ports/volumes)
+
+- Reuses real backups
+
+---
+
+
