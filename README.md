@@ -24,4 +24,27 @@
 - [Maintainer](#maintainer)
 
 ---
+## Overview
+
+This platform offers AI-assisted leave management automation designed for startups and enterprise teams alike — hosted via Docker and powered by:
+
+ n8n for workflows, smart approval logic, and email handling
+
+- PocketBase for secure data storage with real-time triggers
+
+- Runs on AWS EC2, Docker-managed, ready for scale
+
+
+What it does:
+
+- Employees query leave balances via AI
+
+- Conflict checks auto-run (no duplicates or ghost teams)
+
+- Managers approve via email buttons — no logins
+
+- All events logged, backed up, and auditable
+
+This repo combines operational automation with real-world devops structure — making it deployable in 10 minutes with zero manual DB edits.
+
 
