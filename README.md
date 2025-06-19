@@ -98,4 +98,43 @@ Support for basic auth, webhook privacy, and security-hardened env settings.
 6️⃣ Daily Backups
 → All leave data is backed up automatically to .tar.gz in your backups folder.
 
+---
 
+## Installation & Environment Setup
+
+1️⃣ Clone the Repo
+
+```bash
+git clone https://github.com/NiiOsa1/n8n-automation.git
+cd n8n-automation
+```
+
+2️⃣ Set Up Secrets and URLs
+Edit .env with your credentials:
+
+```bash
+N8N_HOST=n8n.yourdomain.com
+N8N_BASIC_AUTH_USER=admin
+N8N_BASIC_AUTH_PASSWORD=your-password
+PB_ADMIN_EMAIL=your@email.com
+PB_ADMIN_PASSWORD=supersecure
+```
+
+3️⃣ Lock Down Your Secrets
+
+```bash
+chmod 600 .env
+```
+
+4️⃣ Ensure Docker & Docker Compose Are Installed
+
+```bash
+docker --version
+docker compose version
+```
+
+5️⃣ Start All Services
+
+```bash
+docker compose --env-file .env up -d --build
+```
