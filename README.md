@@ -10,15 +10,18 @@
 
 ## 📚 Table of Contents
 
-- [Overview](#-overview)
-- [Features](#-features)
-- [Live Workflow](#-live-workflow)
-- [nstallation](#️-installation)
-- [Environment Setup](#-environment-setup)
-- [Docker Usage](#-docker-usage)
-- [Folder Structure](#-folder-structure)
-- [ecurity & Backups](#-security--backups)
-- [Example Screens](#-example-screens)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Maintainer](#-maintainer)
+- [Overview](#overview)
+- [Features](#features)
+- [Live Workflow](#live-workflow)
+- [Installation](#installation)
+- [Environment Setup](#environment-setup)
+- [Docker Usage](#docker-usage)
+- [Folder Structure](#folder-structure)
+- [Security & Backups](#security--backups)
+- [Example Screens](#example-screens)
+- [Contributing](#contributing)
+- [License](#license)
+- [Maintainer](#maintainer)
+
+---
+
