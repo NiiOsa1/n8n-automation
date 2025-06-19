@@ -24,6 +24,7 @@
 - [Maintainer](#maintainer)
 
 ---
+
 ## Overview
 
 This platform offers AI-assisted leave management automation designed for startups and enterprise teams alike — hosted via Docker and powered by:
@@ -74,5 +75,27 @@ Daily .tar.gz backups of all volumes, auto-cleaned after 7 days.
 
 ✔️ Enterprise-Friendly
 Support for basic auth, webhook privacy, and security-hardened env settings.
+
+---
+
+## Live Workflow: How It Works (End-to-End)
+
+1️⃣ Employee Says: "How many days of annual leave do I have left?"
+→ Our n8n-powered AI agent responds in seconds.
+
+2️⃣ Leave Form Submitted
+→ Employee selects leave type, duration, and reason — stored instantly in PocketBase.
+
+3️⃣ Automation Triggers
+→ System checks for policy compliance + overlaps with team calendars.
+
+4️⃣ Email to Manager
+→ Clean "Approve" or "Reject" email lands in manager’s inbox. One tap. Done.
+
+5️⃣ Realtime Sync
+→ PocketBase updates the leave record, status, and audit logs.
+
+6️⃣ Daily Backups
+→ All leave data is backed up automatically to .tar.gz in your backups folder.
 
 
