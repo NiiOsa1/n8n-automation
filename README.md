@@ -47,4 +47,32 @@ What it does:
 
 This repo combines operational automation with real-world devops structure — making it deployable in 10 minutes with zero manual DB edits.
 
+---
+
+## Features
+
+✔️ Ask AI, Not HR
+Employees query their leave balance using a natural language interface powered by n8n.
+
+✔️ Auto Conflict Checks
+The system cross-validates leave requests to avoid team scheduling conflicts.
+
+✔️ One-Click Email Approval
+Managers receive emails with pre-built "Approve/Reject" buttons — no logins, no drama.
+
+✔️ Database Magic via PocketBase
+All leave data is stored and synced in PocketBase — schema-less, realtime, zero-ops.
+
+✔️ End-to-End Logging
+Every action is auditable, timestamped, and backed up daily.
+
+✔️ Cloud or Local Ready
+Runs on AWS, local machines, or internal networks with full Docker support.
+
+✔️ Backups Without Sweat
+Daily .tar.gz backups of all volumes, auto-cleaned after 7 days.
+
+✔️ Enterprise-Friendly
+Support for basic auth, webhook privacy, and security-hardened env settings.
+
 
