@@ -23,6 +23,7 @@
 - [Contributing](#contributing)
 - [License](#license)
 - [Maintainer](#maintainer)
+- [Importable Workflows](#importable-workflows)
 
 ---
 
@@ -374,4 +375,19 @@ Michael Mensah Ofeor
 🔗 GitHub: @NiiOsa1
 
 
+---
+
+## Importable Workflows
+
+### Leave Request Automation
+
+This file contains the full export of the n8n workflow that handles leave submissions, manager approvals, and webhook bridging.
+
+- **File:** [`workflows/leave-request.json`](workflows/leave-request.json)
+- **How to import:**
+  1. Open your n8n editor.
+  2. Click the hamburger menu → *Import from File*.
+  3. Select the JSON file above.
+
+> ✅ Make sure your environment variables and endpoints match those in the `.env` file for proper function.
 
