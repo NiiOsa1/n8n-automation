@@ -1,4 +1,4 @@
-![Leave Automation Banner](banner-leave-automation.png)
+![Leave Automation Banner](examples/banner-leave-automation.png)
 
 # Leave & Vacation Automation Platform – Powered by n8n, PocketBase & Docker
 
