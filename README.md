@@ -255,3 +255,23 @@ N8N_DISABLE_PRODUCTION_MAIN_WEBHOOK_AUTHENTICATION=true
 Health Monitoring
 
 - Docker healthcheck auto-detects failure and self-heals both n8n and PocketBase containers
+
+---
+
+## Example Screens
+
+### Leave Submission and Validation Flow
+![Leave Submission](examples/Leave%20Submission%20and%20Validation%20Flow.png)
+
+
+### Manager Approval Workflow
+![Manager Approval](examples/Manager%20Approval%20Work%20flow.png)
+
+
+### Rejection Handling Logic
+![Rejection Logic](examples/Rejection%20Handling%20logic.png)
+
+
+### AI-Powered Email Agent Flow
+![AI Email Agent](examples/AI%20Email%20Agent%20Flow.png)
+
