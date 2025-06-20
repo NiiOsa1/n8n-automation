@@ -352,3 +352,16 @@ git push origin fix/your-feature-name
 This project is licensed under the MIT License — you’re free to use, modify, and distribute it with attribution.
 
 See LICENSE for full terms.
+
+---
+
+## Maintainer
+
+This project is actively maintained by:
+
+Michael Mensah Ofeor
+📬 michaelofeor2011@yahoo.com
+🔗 GitHub: @NiiOsa1
+
+
+
