@@ -78,7 +78,7 @@ Support for basic auth, webhook privacy, and security-hardened env settings.
 
 ---
 
-## Live Workflow: How It Works (End-to-End)
+## Live Workflow
 
 1️⃣ Employee Says: "How many days of annual leave do I have left?"
 → Our n8n-powered AI agent responds in seconds.
@@ -100,7 +100,7 @@ Support for basic auth, webhook privacy, and security-hardened env settings.
 
 ---
 
-## Installation & Environment Setup
+## Installation
 
 1️⃣ Clone the Repo
 
@@ -135,7 +135,7 @@ docker compose version
 
 ---
 
-## Docker Usage 🐳
+## Docker Usage
 
 ✅ Start Services (Production Mode)
  
@@ -180,7 +180,7 @@ This uses:
 
 ---
 
-##  Folder Structure 📁
+##  Folder Structure 
 
 ```bash
 n8n-automation/
@@ -203,7 +203,7 @@ n8n-automation/
 
 ---
 
-## Security & Backups 🔐
+## Security & Backups 
 
 This automation stack is designed for resilience and confidentiality, offering both passive protection and proactive recovery:
 
@@ -261,12 +261,6 @@ Health Monitoring
 ## Example Screens
 
 ![Leave Submission](examples/leave-submission-flow.png)
-
-
 ![Manager Approval](examples/manager-approval-workflow.png)
-
-
 ![Rejection Logic](examples/rejection-handling-logic.png)
-
-
 ![AI Email Agent](examples/ai-email-agent-flow.png)
