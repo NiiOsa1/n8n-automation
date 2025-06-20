@@ -136,40 +136,47 @@ docker compose version
 ---
 
 ## Environment Setup
+Before running the platform, configure your environment variables in a `.env` file.
 
-Before running the platform, configure your environment variables to match your production or demo context. This is done through `.env` files.
+Create it at the project root:
 
-### 📁 `.env` (Production)
+### 🔐 n8n Settings
 
-Create a file named `.env` in the project root with the following keys:
-
-# --- n8n ---
+```env
 N8N_BASIC_AUTH_ACTIVE=true
 N8N_BASIC_AUTH_USER=admin
 N8N_BASIC_AUTH_PASSWORD=supersecurepassword
 N8N_HOST=n8n.example.com
 N8N_PORT=5678
+```
 
-# --- PocketBase ---
+### 🗂️ PocketBase Settings
+
+```env
 PB_ADMIN_EMAIL=michael@example.com
 PB_ADMIN_PASSWORD=secretpass
 PB_PORT=8090
+```
 
-# --- Common ---
+### 🌐 Common Settings
+
+```env
 WEBHOOK_BASE_URL=https://n8n.example.com
 EDITOR_BASE_URL=https://n8n.example.com
+```
+
+---
+
+💡 **Tip:** You can also create a `.env.demo` for local testing. Just edit the variables accordingly (e.g. disable auth or use `localhost`).
+
 🔐 Security Tip: Run chmod 600 .env to restrict permissions.
 
 🧪 .env.demo (Optional for MVP Testing)
 You can also create a separate .env.demo for testing/demo setups.
 
-env
-Copy
-Edit
-N8N_BASIC_AUTH_ACTIVE=false
-N8N_HOST=localhost
-N8N_PORT=5678
-
+```env
+N8N_BASIC_AUTH_ACTIVE=true        # Enable basic auth
+N8N_PORT=5678 
 PB_ADMIN_EMAIL=test@example.com
 PB_ADMIN_PASSWORD=test123
 PB_PORT=8090
