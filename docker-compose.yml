@@ -1,0 +1,93 @@
+services:
+  pocketbase:
+    build:
+      context: ./docker-pb
+    container_name: pb-demo
+    restart: always
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ./pocketbase-data:/pb_data
+      - ./pocketbase-logs:/app/logs
+      - ./docker-pb/hooks:/app/pb_hooks
+    env_file:
+      - .env
+    command: >
+      ./pocketbase serve
+      --http 0.0.0.0:8090
+      --dir /pb_data
+      --hooksDir /app/pb_hooks
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8090/_/ || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks:
+      - automation-net
+
+  n8n:
+    build:
+      context: ./docker-n8n
+    container_name: n8n-demo
+    restart: always
+    ports:
+      - "127.0.0.1:5678:5678"
+    env_file:
+      - .env
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=${N8N_PORT}
+      - EDITOR_BASE_URL=${EDITOR_BASE_URL}
+      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL}
+      - N8N_WEBHOOK_TUNNEL_URL=${N8N_WEBHOOK_TUNNEL_URL}
+      - EMAIL=${EMAIL}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - N8N_DIAGNOSTICS_ENABLED=${N8N_DIAGNOSTICS_ENABLED}
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS}
+      - N8N_RUNNERS_ENABLED=${N8N_RUNNERS_ENABLED}
+      - TZ=${TZ}
+      - N8N_AUTH_EXCLUDE_ENDPOINTS=${N8N_AUTH_EXCLUDE_ENDPOINTS}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_TASK_RESPONSE_TIMEOUT=${N8N_TASK_RESPONSE_TIMEOUT}
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - automation-net
+
+  pb-webhook-bridge:
+    build:
+      context: ./pb-webhook-bridge
+    container_name: pb-webhook-bridge
+    restart: always
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+      n8n:
+        condition: service_healthy
+    env_file:
+      - .env
+    user: "1000:1000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e 'process.exit(0)'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - automation-net
+
+networks:
+  automation-net:
+    driver: bridge
