@@ -18,6 +18,7 @@
 - [Docker Usage](#docker-usage)
 - [Folder Structure](#folder-structure)
 - [Security & Backups](#security--backups)
+- [Deployment & NGINX](#deployment--nginx)
 - [Example Screens](#example-screens)
 - [Contributing](#contributing)
 - [License](#license)
@@ -311,6 +312,15 @@ Health Monitoring
 
 ---
 
+## Deployment & NGINX
+
+See [`deploy/README.md`](deploy/README.md) for:
+
+- Full NGINX reverse proxy config
+- Domain + SSL setup via Certbot
+- Recovery steps on new EC2 machines
+
+---
 ## Example Screens
 
 ![Leave Submission](examples/leave-submission-flow.png)
