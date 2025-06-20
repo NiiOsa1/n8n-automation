@@ -260,14 +260,13 @@ Health Monitoring
 
 ## Example Screens
 
-### Leave Submission and Validation Flow
 ![Leave Submission](examples/leave-submission-flow.png)
 
-### Manager Approval Workflow
+
 ![Manager Approval](examples/manager-approval-workflow.png)
 
-### Rejection Handling Logic
+
 ![Rejection Logic](examples/rejection-handling-logic.png)
 
-### AI-Powered Email Agent Flow
+
 ![AI Email Agent](examples/ai-email-agent-flow.png)
