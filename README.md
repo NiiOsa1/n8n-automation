@@ -242,8 +242,8 @@ n8n-automation/
 ├── backup_all.sh            #  Cron-based daily backup script
 ├── restore.sh               #  Interactive restore script
 ├── docker-compose.yml       #  Main Docker compose file
-├── docker-n8n/              # 🛠️Custom Dockerfile for n8n
-├── docker-pb/               # 🛠️Custom Dockerfile for PocketBase
+├── docker-n8n/              # 🛠️ustom Dockerfile for n8n
+├── docker-pb/               # 🛠️ustom Dockerfile for PocketBase
 ├── pb-webhook-bridge/       #  Realtime PocketBase → n8n webhook listener
 │   └── index.cjs            # → Auth + EventSource-based bridge logic
 ├── n8n_data/                #  Persistent volume for n8n
@@ -333,18 +333,18 @@ docker-compose -f docker-compose.demo.yml --env-file .env.demo up -d
 Typical Contribution Workflow
 
 
-# Clone your fork
+### Clone your fork
 git clone https://github.com/your-username/n8n-automation.git
 cd n8n-automation
 
-# Create a feature branch
+### Create a feature branch
 git checkout -b fix/your-feature-name
 
-# Make changes, commit, push
+### Make changes, commit, push
 git add .
 git commit -m "Describe your change"
 git push origin fix/your-feature-name
-
+```
 --- 
 
 ## License
