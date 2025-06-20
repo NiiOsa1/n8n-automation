@@ -345,4 +345,10 @@ git add .
 git commit -m "Describe your change"
 git push origin fix/your-feature-name
 
+--- 
 
+## License
+
+This project is licensed under the MIT License — you’re free to use, modify, and distribute it with attribution.
+
+See LICENSE for full terms.
