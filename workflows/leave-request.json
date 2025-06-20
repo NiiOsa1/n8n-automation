@@ -1,0 +1,3525 @@
+{
+  "name": "Leave Request: Auto Fetch & Process (v1)",
+  "nodes": [
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.email }}\n\n\n\n\n\n\n",
+        "subject": "=Leave Approval Request \n",
+        "bodyContent": "=Hi {{ $json.fullName }},\n\nYour leave request from {{ $json.friendlyStart }} to {{ $json.friendlyEnd }} has been successfully submitted and is pending manager approval.\n\nYou will receive an update once your request is reviewed.\n\nRegards,  \nHR Team\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        700,
+        -1080
+      ],
+      "id": "dc0e22cc-4177-4094-ab3c-37d836279d2e",
+      "name": "🔹 Send Email: Notify Employee",
+      "webhookId": "333ef6ac-b9f3-41cb-b614-563b71ecf6e0",
+      "alwaysOutputData": true,
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "Mk09V0YpVtoWRdJf",
+          "name": "Leave Request related Auths"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.email }}",
+        "subject": "=Leave Request Declined",
+        "bodyContent": "=Hi {{ $json.fullName }},\n\nUnfortunately, we were unable to process your recent leave request as it does not align with the company’s leave policy.\n\nIf you believe this was in error or require further clarification, please reach out to your manager.\n\nThank you for your understanding.\n\nKind regards,  \nHR Team\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -920
+      ],
+      "id": "36162912-611f-4191-8992-3fceff4b2b9b",
+      "name": "🔹 Send Rejected Email: Employee",
+      "webhookId": "8566210c-7e03-43a1-ad0c-1d11448fcdae",
+      "alwaysOutputData": false,
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "Mk09V0YpVtoWRdJf",
+          "name": "Leave Request related Auths"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  const data = item.json || {};\n\n  // ✳️ Determine where employee data lives\n  const employee = data.items?.[0] || {}; // ← where employee info usually is\n  const root = data;\n\n  // 📛 IDs\n  const leaveRequestId = root.id || \"\";\n  const employeeRecordId = root.employeeID || employee.id || \"\"; // Actual record FK\n\n  // 📆 Dates\n  const startDateStr = root.startDate || \"\";\n  const endDateStr = root.endDate || \"\";\n  const startDate = startDateStr ? new Date(startDateStr) : null;\n  const endDate = endDateStr ? new Date(endDateStr) : null;\n\n  let numberOfDays = 0;\n  if (startDate && endDate && !isNaN(startDate) && !isNaN(endDate)) {\n    let curDate = new Date(startDate);\n    while (curDate <= endDate) {\n      const day = curDate.getUTCDay();\n      if (day !== 0 && day !== 6) numberOfDays++;\n      curDate.setUTCDate(curDate.getUTCDate() + 1);\n    }\n  }\n\n  // 👤 Employee Data\n  const fullName = root.fullName || employee.fullName || \"\";\n  const email = root.email || employee.email || \"\";\n  const managerEmail = root.managerEmail || employee.managerEmail || \"\";\n  const employeeEmail = email;\n  const employeeCode = root.employeeID || employee.employeeID || \"\";\n\n  // 📊 Stats\n  const leave_taken = parseInt(root.leave_taken ?? employee.leave_taken ?? \"0\", 10);\n  const leave_total_allocated = parseInt(root.leave_total_allocated ?? employee.leave_total_allocated ?? \"0\", 10);\n  const sick_days_taken = parseInt(root.sick_days_taken ?? employee.sick_days_taken ?? \"0\", 10);\n  const sick_days_entitled = parseInt(root.sick_days_entitled ?? employee.sick_days_entitled ?? \"0\", 10);\n\n  const leave_balance = Math.max(0, leave_total_allocated - leave_taken);\n  const sick_days_left = Math.max(0, sick_days_entitled - sick_days_taken);\n\n  return {\n    json: {\n      leaveRequestId,\n      employeeRecordId,\n      fullName,\n      email,\n      managerEmail,\n      employeeEmail,\n      employeeCode,\n      EmployeeInfo: `${fullName} (${employeeCode})`,\n      leaveType: (root.leaveType || \"Normal\").trim().replace(/\\b\\w/g, c => c.toUpperCase()),\n      startDate: startDateStr,\n      endDate: endDateStr,\n      numberOfDays,\n      leave_taken,\n      leave_balance,\n      leave_total_allocated,\n      sick_days_taken,\n      sick_days_entitled,\n      sick_days_left\n    },\n    pairedItem: index\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1620,
+        -1520
+      ],
+      "id": "2a5ce8f7-bcac-4717-8b57-fba48e6e526a",
+      "name": "Prepare Leave Request Data",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  const json = item.json;\n  const leaveType = (json.leaveType || \"\").toLowerCase().trim();\n\n  // 🔍 Clean and normalize numbers\n  const clean = (val) => parseFloat((val ?? \"\").toString().replace(/[^\\d.-]/g, \"\")) || 0;\n\n  // 📊 Parse all relevant numeric fields\n  const leaveTaken = clean(json.leave_taken);\n  const leaveTotal = clean(json.leave_total_allocated);\n  const sickTaken = clean(json.sick_days_taken);\n  const sickEntitled = clean(json.sick_days_entitled);\n  const numberOfDays = clean(json.numberOfDays);\n\n  const conflictCheckPassed = json.conflictCheckPassed === true;\n\n  // ✅ Compute real-time balance\n  let isBalanceOk = false;\n  if (leaveType === \"sick\") {\n    const sickBalance = sickEntitled - sickTaken;\n    isBalanceOk = sickBalance >= numberOfDays;\n  } else {\n    const annualBalance = leaveTotal - leaveTaken;\n    isBalanceOk = annualBalance >= numberOfDays;\n  }\n\n  const isValid = isBalanceOk && conflictCheckPassed;\n\n  return {\n    json: {\n      ...json,\n      isValid,\n      reasons: [\n        ...(isBalanceOk ? [] : [`Insufficient ${leaveType === \"sick\" ? \"sick leave\" : \"annual leave\"} balance`]),\n        ...(conflictCheckPassed ? [] : ['Conflict check failed']),\n      ],\n    },\n    pairedItem: index,\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        -1060
+      ],
+      "id": "bdbc541a-e6f0-4548-96d4-ef7107cfddb8",
+      "name": "Validate Leave Request",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  const data = item.json;\n\n  const leaveRequestId = data.leaveRequestId || data.id || \"\";\n  const employeeRecordId = data.employeeRecordId || data.employeeCode || \"\";\n\n  const startDateStr = typeof data.startDate === \"string\" ? data.startDate.trim() : \"\";\n  const endDateStr = typeof data.endDate === \"string\" ? data.endDate.trim() : \"\";\n\n  const start = startDateStr ? new Date(startDateStr) : null;\n  const end = endDateStr ? new Date(endDateStr) : null;\n\n  let numberOfDays = 0;\n  if (start && end && !isNaN(start) && !isNaN(end)) {\n    let current = new Date(start);\n    while (current <= end) {\n      const dow = current.getUTCDay();\n      if (dow !== 0 && dow !== 6) numberOfDays++;\n      current.setUTCDate(current.getUTCDate() + 1);\n    }\n  }\n\n  const leave_taken = parseInt(data.leave_taken || \"0\", 10);\n  const leave_total_allocated = parseInt(data.leave_total_allocated || \"0\", 10);\n  const sick_days_taken = parseInt(data.sick_days_taken || \"0\", 10);\n  const sick_days_entitled = parseInt(data.sick_days_entitled || \"0\", 10);\n\n  const leave_balance = Math.max(0, leave_total_allocated - leave_taken);\n  const sick_days_left = Math.max(0, sick_days_entitled - sick_days_taken);\n\n  return {\n    json: {\n      leaveRequestId,\n      employeeRecordId,\n      fullName: data.fullName || \"\",\n      email: data.email || \"\",\n      managerEmail: data.managerEmail || \"\",\n      employeeEmail: data.employeeEmail || data.email || \"\",\n      employeeCode: employeeRecordId,\n      EmployeeInfo: `${data.fullName || \"\"} (${employeeRecordId})`,\n      leaveType: (data.leaveType || \"Normal\").trim().replace(/\\b\\w/g, c => c.toUpperCase()),\n      startDate: startDateStr,\n      endDate: endDateStr,\n      numberOfDays,\n      leave_taken,\n      leave_balance,\n      leave_total_allocated,\n      sick_days_taken,\n      sick_days_entitled,\n      sick_days_left\n    },\n    pairedItem: index\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1260,
+        -1520
+      ],
+      "id": "499caa10-dd3f-4dc6-aff5-62a9c2a9131a",
+      "name": "Calculate Leave Duration",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4a0d94c9-163c-4f38-aa67-ac04eb529eea",
+              "name": "id",
+              "value": "={{ $json.leaveRequestId }}",
+              "type": "string"
+            },
+            {
+              "id": "285d4982-b1f4-47c0-a571-7bd3b37fd6f6",
+              "name": "calculatedNumberOfDays",
+              "value": "={{ $json.numberOfDays }}",
+              "type": "string"
+            },
+            {
+              "id": "e4827401-2539-4b96-8aa1-7dd66efbb7ef",
+              "name": "status",
+              "value": "pending",
+              "type": "string"
+            },
+            {
+              "id": "28fb92c4-4de5-4200-a632-86b208f60d63",
+              "name": "startDate",
+              "value": "={{$json.startDate}}",
+              "type": "string"
+            },
+            {
+              "id": "03a9989b-55bc-4a65-ae58-9150cc9862de",
+              "name": "endDate",
+              "value": "={{$json.endDate}}",
+              "type": "string"
+            },
+            {
+              "id": "a330b8e2-5fb3-4abb-a4a3-e2eb45a79ed9",
+              "name": "employeeID",
+              "value": "={{ $json.employeeRecordId }}",
+              "type": "string"
+            },
+            {
+              "id": "9ec7c9a6-d01f-4957-a9d9-ce091273940f",
+              "name": "employeeRecordID",
+              "value": "={{ $json.leaveRequestId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1040,
+        -1520
+      ],
+      "id": "3ae2f386-01cb-4b2b-a5ae-3bd9627a219d",
+      "name": "Set Leave Request ID and Days",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract merged input\nconst merged = $input.item.json;\nconst allLeaves = merged.items || [];\n\nconst currentLeave = {\n  id: merged.id,\n  employeeID: merged.employeeID,\n  startDate: merged.startDate,\n  endDate: merged.endDate,\n  created: merged.created,\n  status: merged.status,\n  leaveType: merged.leaveType || \"Annual\"\n};\n\nconst currentLeaveId = (currentLeave.id || \"\").trim();\nconst employeeID = typeof currentLeave.employeeID === \"object\"\n  ? currentLeave.employeeID.id\n  : String(currentLeave.employeeID).trim();\n\nconst newStart = new Date(currentLeave.startDate);\nconst newEnd = new Date(currentLeave.endDate);\n\nlet numberOfDays = 0;\nlet conflictDetected = false;\nlet overlapLogs = [];\n\nif (!currentLeaveId || !employeeID || isNaN(newStart) || isNaN(newEnd)) {\n  return [\n    {\n      json: {\n        ...currentLeave,\n        conflictCheckPassed: false,\n        numberOfDays,\n        error: \"Missing or invalid leaveRequestId/startDate/endDate/employeeID\"\n      }\n    }\n  ];\n}\n\n// Check if this is the latest pending request for the employee\nconst myPending = allLeaves.filter(r =>\n  String(r.employeeID).trim() === employeeID &&\n  (r.status || \"\").toLowerCase() === \"pending\"\n);\n\nconst latestPending = myPending.sort((a, b) =>\n  new Date(b.created) - new Date(a.created)\n)[0];\n\nif (!latestPending || latestPending.id !== currentLeaveId) {\n  return [\n    {\n      json: {\n        ...currentLeave,\n        conflictCheckPassed: false,\n        numberOfDays,\n        error: \"This is not the latest pending leave request\"\n      }\n    }\n  ];\n}\n\n// Track months for optimization\nconst monthsToCheck = new Set();\nfor (let d = new Date(newStart); d <= newEnd; d.setDate(d.getDate() + 1)) {\n  monthsToCheck.add(`${d.getFullYear()}-${d.getMonth()}`);\n}\n\n// Check for overlaps from other employees\nconst conflicts = allLeaves.filter(r => {\n  const rEmployeeID = typeof r.employeeID === \"object\"\n    ? r.employeeID.id\n    : String(r.employeeID).trim();\n\n  if (rEmployeeID === employeeID || r.id === currentLeaveId) return false;\n\n  const status = (r.status || \"\").toLowerCase();\n  if (![\"pending\", \"approved\"].includes(status)) return false;\n\n  const rStart = new Date(r.startDate);\n  const rEnd = new Date(r.endDate);\n  if (isNaN(rStart) || isNaN(rEnd)) return false;\n\n  const rMonths = new Set();\n  for (let d = new Date(rStart); d <= rEnd; d.setDate(d.getDate() + 1)) {\n    rMonths.add(`${d.getFullYear()}-${d.getMonth()}`);\n  }\n\n  const monthOverlap = [...rMonths].some(m => monthsToCheck.has(m));\n  if (!monthOverlap) return false;\n\n  const overlap = newStart <= rEnd && newEnd >= rStart;\n  if (overlap) {\n    overlapLogs.push({ id: r.id, employeeID: rEmployeeID, rStart, rEnd });\n  }\n\n  return overlap;\n});\n\nconflictDetected = conflicts.length > 0;\n\n// ✅ Recalculate working days only (exclude weekends)\nfor (let cur = new Date(newStart); cur <= newEnd; cur.setDate(cur.getDate() + 1)) {\n  const day = cur.getDay();\n  if (day !== 0 && day !== 6) numberOfDays++;\n}\n\nreturn [\n  {\n    json: {\n      ...currentLeave,\n      conflictCheckPassed: !conflictDetected,\n      numberOfDays,\n      overlapLogs\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        -1500
+      ],
+      "id": "dbd36d24-cbfd-44ee-b1ae-1620f827477a",
+      "name": "Conflict Checker",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "=http://pocketbase:8090/api/collections/employees/records\n",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter",
+              "value": "=id=\"{{ $json.employeeRecordId }}\"\n"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization ",
+              "value": "=Bearer {{$node[\"PocketBase: Admin Login\"].json.token}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1780,
+        -1780
+      ],
+      "id": "0b2e18d2-9734-40dc-aea5-b256b66893f3",
+      "name": "Get Employee Data",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://pocketbase:8090/api/collections/LeaveRequests/records/{{ $node[\"Compute Leave Balances\"].json.id }}\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"Authenticate PB Admin\"].json.token}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"numberOfDays\": {{ $node[\"Compute Leave Balances\"].json[\"numberOfDays\"] || 0 }},\n  \"conflictCheckPassed\": true\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -720,
+        -620
+      ],
+      "id": "160249a8-e01b-4f83-b2b8-9fe59b7de0a4",
+      "name": "PATCH Update Leave Request Days",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pocketbase:8090/api/admins/auth-with-password",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"identity\": \"{{ $env.PB_ADMIN_EMAIL }}\",\n  \"password\": \"{{ $env.PB_ADMIN_PASSWORD }}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2580,
+        -1660
+      ],
+      "id": "1e2ef74f-1bb5-40f9-bbce-6a466cb5e1a0",
+      "name": "PocketBase: Admin Login",
+      "executeOnce": false,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://pocketbase:8090/api/collections/LeaveRequests/records/{{ $json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"PocketBase: Admin Login\"].json.token}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "Pending"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -840,
+        -1520
+      ],
+      "id": "63c660eb-38c2-43cf-ad57-c0e282d38e90",
+      "name": "Create Leave Request (Initial Submission)",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "http://pocketbase:8090/api/collections/LeaveRequests/records",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter",
+              "value": "status ~ \"pending\" || status ~ \"approved\""
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"PocketBase: Admin Login\"].json.token}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -620,
+        -1380
+      ],
+      "id": "14ba9eda-115b-4f13-98ea-ce1a52d37810",
+      "name": "Fetch All Active Leaves",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        -460,
+        -1500
+      ],
+      "id": "f246b973-70be-4fbb-a9fc-b611ca905259",
+      "name": "Merge: Leave + All Records",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -820,
+        -1300
+      ],
+      "id": "b02c7fc0-a605-405f-b7a4-192dc7e59fe1",
+      "name": "⏱ Wait for Save",
+      "webhookId": "72bbc9b8-90b2-4e12-a65a-739606f60cb7",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const sanitize = (value, fallback = '') => (value || '').toString().trim() || fallback;\n\n// Extract input data safely\nconst name         = sanitize($json.fullName, 'Employee');\nconst mongoId      = sanitize($json.employeeMongoId, '');\nconst displayId    = sanitize($json.employeeID, 'N/A');\nconst leaveType    = sanitize($json.leaveType, 'Annual Leave');\nconst start        = sanitize($json.friendlyStart, 'Start Date');\nconst end          = sanitize($json.friendlyEnd, 'End Date');\nconst leaveId      = sanitize($json.leaveRequestId, '');\nconst numberOfDays = Number.isFinite(+($json.numberOfDays)) ? `${$json.numberOfDays}` : 'To Be Confirmed';\n\nif (!leaveId || !mongoId) {\n  throw new Error('Missing required leaveRequestId or employeeMongoId');\n}\n\n// ✅ Use the correct public base URL\nconst baseUrl = ($env.WEBHOOK_BASE_URL || 'https://n8n.niiosalabs.com').replace(/\\/+$/, '');\n\n// ✅ Original UUIDs\nconst APPROVE_UUID = 'c030d6aa-d5ef-48d7-9b68-f2cd61024f24';\nconst REJECT_UUID  = '876b7d04-9d7d-46ce-8516-f09276918b9d';\n\n// ✅ Encode URL parts safely\nconst encodedLeaveId = encodeURIComponent(leaveId);\nconst encodedEmpId   = encodeURIComponent(mongoId);\n\n// ✅ Phishing-neutral routes\nconst approveUrl = `${baseUrl}/webhook/${APPROVE_UUID}/responseapp/${encodedLeaveId}/${encodedEmpId}`;\nconst rejectUrl  = `${baseUrl}/webhook/${REJECT_UUID}/responseap/${encodedLeaveId}/${encodedEmpId}`;\n\n// ✉️ Email Subject & Message\nconst subject = `Leave Approval Needed | ${displayId}, ${name}`;\n\nconst message = `\n  <div style=\"font-family:sans-serif;line-height:1.6;font-size:15px;color:#333;\">\n    <p>Hi Manager,</p>\n\n    <p><strong>${name} (${displayId})</strong> has submitted a leave request:</p>\n\n    <ul>\n      <li><strong>Type:</strong> ${leaveType}</li>\n      <li><strong>Start:</strong> ${start}</li>\n      <li><strong>End:</strong> ${end}</li>\n      <li><strong>Days:</strong> ${numberOfDays}</li>\n    </ul>\n\n    <p>Please take action below:</p>\n\n    <p>\n      <a href=\"${approveUrl}\" style=\"background:#28a745;color:white;padding:10px 16px;text-decoration:none;border-radius:5px;margin-right:10px;display:inline-block;\">✅ Approve</a>\n      <a href=\"${rejectUrl}\" style=\"background:#dc3545;color:white;padding:10px 16px;text-decoration:none;border-radius:5px;display:inline-block;\">❌ Reject</a>\n    </p>\n\n    <p style=\"margin-top:40px;\">Thank you,<br/>HR Team</p>\n  </div>\n`.trim();\n\n// ✅ Output\nreturn [{\n  json: {\n    ...$json,\n    emailSubject: subject,\n    emailMessage: message,\n    approveLink: approveUrl,\n    rejectLink: rejectUrl\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        -920
+      ],
+      "id": "daa1fc88-d659-49a7-947e-0a7898b755e7",
+      "name": "Format Manager Email Content"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json[\"expand\"][\"employeeID\"][\"email\"] }}",
+        "subject": "Leave Request Rejected",
+        "bodyContent": "=Hi {{ $json[\"expand\"][\"employeeID\"][\"fullName\"] || \"Employee\" }},\n\nYour recent leave request has been rejected.\n\nFor clarification, please contact your manager at {{ $json[\"expand\"][\"employeeID\"][\"managerEmail\"] }}.\n\nThank you.\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        -1580,
+        -340
+      ],
+      "id": "c34b1255-b89c-461e-a26f-480f09a3f5e5",
+      "name": "Notify Employee: Leave Rejected",
+      "webhookId": "22ba0b26-1f2b-4643-be1b-98187d9c7446",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "Mk09V0YpVtoWRdJf",
+          "name": "Leave Request related Auths"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        -2240
+      ],
+      "id": "58e7e6ef-6a4b-4c47-aea7-16618d6d0c3e",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "LlIvaDRQHwLp8p69",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"name\": \"Mark Aisle\",\n  \"leaveType\": \"Annual\",\n  \"startDate\": \"2025-05-29\",\n  \"endDate\": \"2025-06-05\",\n  \"from\": \"michaelofeor2011@yahoo.com\"\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        -120,
+        -2240
+      ],
+      "id": "007b470c-f3d2-49f8-ad7a-507a12105f4e",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json[\"from\"] || $json[\"email\"] || \"default-session\" }}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -260,
+        -2220
+      ],
+      "id": "d21a7005-90f5-4fb8-8cc2-48fdda012616",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1220,
+        -2280
+      ],
+      "id": "65ad69da-d8bb-4753-aca0-1566ac137f4b",
+      "name": "Classifier Chat Model (gpt-4o-mini)",
+      "credentials": {
+        "openAiApi": {
+          "id": "LlIvaDRQHwLp8p69",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an intelligent HR assistant. Analyze the email query and respond based solely on the provided employee and leave records.\n\n## Email Query:\nSubject: {{ $json.subject }}\nBody: {{ $json.bodyPreview || $json.body }}\n\n## Employee Table Record (From 'Employee' table):\n{{ $json.employee }}\n\n## LeaveRequest Table Records (From 'LeaveRequests' table, joined via employeeID):\n{{ $json.leaveRequests }}\n\n## Task:\n- Compose a clear, professional email response to the employee.\n- Only use facts present in the above records.\n- Do not speculate, infer, or guess. If data is unavailable or incomplete, acknowledge it helpfully.\n- Assume a one-to-many relationship: one employee can have multiple leave records.\n\n## Signature Policy:\n- Close with \"Best regards,\\nHR Department\"\n- Do NOT include placeholders like [Your Name].\n- Do NOT generate personal names unless explicitly present in the input data.\n\n## Tone:\nPolite, clear, and HR-appropriate. Avoid small talk, filler, or markdown formatting.\n\n## REQUIRED JSON Output Format:\nReturn only raw JSON (no markdown, no explanations):\n\n{\n  \"aiResponse\": \"Your response here.\"\n}\n",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        -2060
+      ],
+      "id": "096d4f8e-6f12-4fc7-a7fa-8d034c8bbe5a",
+      "name": "Leave Enquiry AI Agent1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -500,
+        -1840
+      ],
+      "id": "8cb7859c-2fd5-4665-907b-670b864634af",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "LlIvaDRQHwLp8p69",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "leave_request",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "908ca7d7-aca5-4612-8c3e-867fd0504cd0"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "62e73aa9-62e8-44ba-9bcc-24f2d853f678",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "leave_query",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2c8f5516-9913-459a-98ed-ef3e41a8d7ab",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "other",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -720,
+        -2500
+      ],
+      "id": "d16c6c8f-d83f-44ca-9379-34a01e3d422e",
+      "name": "Intent Router"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $node[\"Intent Router\"].json[\"from\"] }}\n\n",
+        "subject": "=RE: {{ $json.subject || \"Your Leave Query\" }}",
+        "bodyContent": "={{ $node[\"Edit Fields7\"].json[\"aiResponse\"] || \"Hi, unfortunately we couldn’t interpret your query. Please contact HR.\" }}\n\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -2040
+      ],
+      "id": "a2872028-68c4-4828-a8b0-0a90f352ac7b",
+      "name": "Send Leave Query Reply",
+      "webhookId": "865b11e1-5515-4731-a69c-82fbbb925b25",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "Mk09V0YpVtoWRdJf",
+          "name": "Leave Request related Auths"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"aiResponse\": \"Your response here.\"\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        100,
+        -1820
+      ],
+      "id": "4e228187-62a3-4299-bc5c-b57175dd0be2",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "94d1e6bf-ae88-42ea-b094-7b3e2466d915",
+              "name": "aiResponse",
+              "value": "={{ $json.output.aiResponse }}\n",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        -2040
+      ],
+      "id": "df72cf67-23c6-444c-90e9-513ec1ec2652",
+      "name": "Edit Fields7"
+    },
+    {
+      "parameters": {
+        "path": "responseapp/:leaveId/:employeeId",
+        "responseMode": "responseNode",
+        "options": {
+          "ignoreBots": false
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2840,
+        -620
+      ],
+      "id": "b0d81cc6-6203-47e6-a71e-58a195f67bd6",
+      "name": "Webhook: Approve Leave",
+      "webhookId": "c030d6aa-d5ef-48d7-9b68-f2cd61024f24"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json[\"from\"] || $json[\"email\"] || \"default-session\" }}",
+        "contextWindowLength": "={{ 5 }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -360,
+        -1780
+      ],
+      "id": "9c540cd2-af3d-41d5-abfa-7d3ee3a92e31",
+      "name": "Simple Memory1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "88c79d45-a1b9-4e61-87cf-cce0714e55e3",
+              "leftValue": "={{(() => {\n  const from = ($json.from || '').toLowerCase();\n  const recipients = Array.isArray($json.to) ? $json.to.map(e => e.toLowerCase()) : [];\n\n  return from !== 'leave@niiosalabs.com' && recipients.includes('leave@niiosalabs.com');\n})()}}\n",
+              "rightValue": "=leave@niiosalabs.com",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1600,
+        -2440
+      ],
+      "id": "87259670-4b4e-442b-bb3a-96bdf0083acf",
+      "name": "IF Not From Self"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"intent\": \"leave_request\"\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        -980,
+        -2280
+      ],
+      "id": "2edb11f6-c8ec-4d2a-a5cc-fd9684988167",
+      "name": "Structured Output Parser2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d3519e54-4187-4913-ab01-3e328d4c9aeb",
+              "name": "email_id",
+              "value": "={{ $json.email_id || null }}",
+              "type": "string"
+            },
+            {
+              "id": "c02cbd6d-c51c-4ddc-bc8c-7b4d73074933",
+              "name": "email_subject",
+              "value": "={{ $json.subject || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "3797d89f-2a21-47e9-b90c-d1e2d34a69f0",
+              "name": "email_body",
+              "value": "={{ $json.content || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "c8a889fe-dc6b-4ae8-aff1-4e1e8bd4fe6a",
+              "name": "body_text",
+              "value": "={{ $json.body_text || '' }}\"",
+              "type": "string"
+            },
+            {
+              "id": "e239d9ac-9974-4a3c-b390-832ac2cd414d",
+              "name": "email_from",
+              "value": "={{ $json.from_email || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "14f7bddb-a7d8-4e86-8759-bb2df54d742a",
+              "name": "email_senderName",
+              "value": "={{ $json.sender_name || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "04193927-0153-46b3-87d8-fc451c1427d1",
+              "name": "email_to",
+              "value": "={{ $json.email_to || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "7248e142-c6e6-4b3b-91e9-7f3415039227",
+              "name": "parse_status",
+              "value": "cleaned",
+              "type": "string"
+            },
+            {
+              "id": "164f8c7e-0aff-4fff-bb59-b488dadb19b5",
+              "name": "source_type",
+              "value": "outlook",
+              "type": "string"
+            },
+            {
+              "id": "07053718-62af-4a6a-b3af-a44ef18aa976",
+              "name": "meta",
+              "value": "={{ $json.meta || {} }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1980,
+        -2520
+      ],
+      "id": "b62929c3-eba4-4577-9a04-beae0af5d728",
+      "name": "Normalized Email Fields"
+    },
+    {
+      "parameters": {
+        "url": "=http://pocketbase:8090/api/collections/LeaveRequests/records/{{ $json.recordId }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter",
+              "value": "status = \"\""
+            },
+            {
+              "name": "expand",
+              "value": "employeeID"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.token}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2140,
+        -1780
+      ],
+      "id": "b6e0e8f3-ea6d-4dbd-ba1c-b1a5d1652fbf",
+      "name": "Fetch Leave Record",
+      "alwaysOutputData": false,
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "path": "responseap/:leaveId/:employeeId",
+        "responseMode": "responseNode",
+        "options": {
+          "ignoreBots": false
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2840,
+        -340
+      ],
+      "id": "e893d3de-14b6-4add-b101-484d59639072",
+      "name": "RejectWebhook",
+      "webhookId": "876b7d04-9d7d-46ce-8516-f09276918b9d"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7da77052-8799-4926-82d6-155b6dd28e2a",
+              "name": "leaveId",
+              "value": "={{ $json.params.leaveId }}",
+              "type": "string"
+            },
+            {
+              "id": "a2ec2457-494c-4c78-9e06-e4ae4ddde643",
+              "name": "employeeId",
+              "value": "={{ $json.params.employeeId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2580,
+        -340
+      ],
+      "id": "8d059e5f-0564-4812-a4c8-9e9c4b437c4d",
+      "name": "Extract Reject Params"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pocketbase:8090/api/admins/auth-with-password",
+        "sendBody": true,
+        "specifyBody": "=json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"identity\": \"{{ $env.PB_ADMIN_EMAIL }}\",\n  \"password\": \"{{ $env.PB_ADMIN_PASSWORD }}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2380,
+        -340
+      ],
+      "id": "0d091250-14db-404d-ba4c-1db80261fbc9",
+      "name": "Admin Auth (Token)"
+    },
+    {
+      "parameters": {
+        "url": "=http://pocketbase:8090/api/collections/LeaveRequests/records/{{$node[\"RejectWebhook\"].json[\"params\"][\"leaveId\"]}}?expand=employeeID\n\n\n\n\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"Admin Auth (Token)\"].json.token.trim() }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2180,
+        -340
+      ],
+      "id": "7abca19c-73fb-416f-b2f7-c24a0e826c62",
+      "name": "PB Auth Request",
+      "alwaysOutputData": false,
+      "retryOnFail": false,
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "466207e1-e10e-4c79-9aca-877ade3451bf",
+              "name": "leaveId",
+              "value": "={{$node[\"Extract Reject Params\"].json[\"leaveId\"]}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2000,
+        -340
+      ],
+      "id": "09a0a645-9fb4-4c78-9e54-6777a0b3d962",
+      "name": "Prepare Reject Patch"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://pocketbase:8090/api/collections/LeaveRequests/records/{{$json.leaveId}}?expand=employeeID",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"Admin Auth (Token)\"].json.token}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"status\": \"Rejected\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1780,
+        -340
+      ],
+      "id": "35f28050-4dd1-40e5-8b98-3acde5f9b056",
+      "name": "Patch Leave as Rejected"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <title>Leave Rejected</title>\n    <meta charset=\"UTF-8\">\n    <meta name=\"robots\" content=\"noindex, nofollow\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; style-src 'self' 'unsafe-inline';\">\n    <meta http-equiv=\"X-Content-Type-Options\" content=\"nosniff\">\n    <style>\n      body {\n        background: #fff7f7;\n        color: #a33;\n        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;\n        text-align: center;\n        margin-top: 10vh;\n        padding: 0 1rem;\n      }\n      .emoji {\n        font-size: 3rem;\n        margin-bottom: 1rem;\n      }\n      main {\n        max-width: 420px;\n        margin: auto;\n      }\n    </style>\n  </head>\n  <body>\n    <main>\n      <div class=\"emoji\" aria-label=\"cross mark\">❌</div>\n      <h2>Leave Rejected Successfully</h2>\n      <p>This tab may now be closed.</p>\n    </main>\n  </body>\n</html>\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        -1360,
+        -340
+      ],
+      "id": "afff41b5-d58c-412b-aab3-ca9cbb59215d",
+      "name": "Return Rejection Success"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "19513364-f03c-4b52-8ca3-6b708fc5b0bc",
+              "name": "leaveId",
+              "value": "={{ $json.params.leaveId }}",
+              "type": "string"
+            },
+            {
+              "id": "341ef21a-b355-4306-9dd6-1f0b850536f8",
+              "name": "employeeId",
+              "value": "={{ $json.params.employeeId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2640,
+        -620
+      ],
+      "id": "f52cf128-f6f4-4a54-a02d-c9413047496a",
+      "name": "Extract Approve Params"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pocketbase:8090/api/admins/auth-with-password",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"identity\": \"{{ $env.PB_ADMIN_EMAIL }}\",\n  \"password\": \"{{ $env.PB_ADMIN_PASSWORD }}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2440,
+        -620
+      ],
+      "id": "5433b908-eea9-437a-b52b-86a1d3d5e2e6",
+      "name": "Authenticate PB Admin"
+    },
+    {
+      "parameters": {
+        "url": "=http://pocketbase:8090/api/collections/LeaveRequests/records/{{$node[\"Webhook: Approve Leave\"].json[\"params\"][\"leaveId\"]}}?expand=employeeID\n\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"Authenticate PB Admin\"].json[\"token\"]}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2240,
+        -620
+      ],
+      "id": "9410e403-185e-4ee0-bc90-5b79ec824406",
+      "name": "Fetch Leave Request (PB)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "72c20d21-ca7f-4fde-908e-9af6ea36d94e",
+              "name": "leaveId",
+              "value": "={{$node[\"Extract Approve Params\"].json[\"leaveId\"]}}",
+              "type": "string"
+            },
+            {
+              "id": "0ae3fb92-3911-49e6-9906-2e18ce9ef73f",
+              "name": "",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2020,
+        -620
+      ],
+      "id": "32d668ab-e28c-4043-968e-003cbbb67355",
+      "name": "Build Approval Payload"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://pocketbase:8090/api/collections/LeaveRequests/records/{{$json.leaveId}}?expand=employeeID\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"Authenticate PB Admin\"].json.token}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"status\": \"Approved\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1820,
+        -620
+      ],
+      "id": "7d9d16f1-61ef-4c2a-a43f-9a77227fb38d",
+      "name": "Fetch Employee Leave Summary"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  const start = new Date(item.json.startDate);\n  const end = new Date(item.json.endDate);\n\n  let count = 0;\n  const cur = new Date(start);\n  while (cur <= end) {\n    const day = cur.getDay();\n    if (day !== 0 && day !== 6) count++; // skip Sunday (0) and Saturday (6)\n    cur.setDate(cur.getDate() + 1);\n  }\n\n  return {\n    json: {\n      ...item.json,\n      numberOfDays: count\n    },\n    pairedItem: index\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1660,
+        -620
+      ],
+      "id": "cfc42afa-3b76-4451-a36d-ea9181483017",
+      "name": "Compute #Days Requested"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 🧾 Constants for future expansion and validation\nconst LEAVE_TYPES = {\n  SICK: \"sick\",\n  ANNUAL: \"annual\",\n};\n\nconst STATUS = {\n  APPROVED: \"approved\",\n};\n\n// 🧼 Utility: sanitize and convert values to float\nconst clean = (val) => parseFloat((val ?? \"\").toString().replace(/[^\\d.-]/g, \"\")) || 0;\n\n// 📦 Normalize and extract relevant fields\nconst leaveType = ($json.leaveType || \"\").toLowerCase().trim();\nconst status = ($json.status || \"\").toLowerCase().trim();\nconst numberOfDays = clean($json.numberOfDays);\n\n// 🔗 Resolve linked employee data (from expand or fallback)\nconst employee = $json.expand?.employeeID || {};\n\n// 📊 Load entitlement data with fallback safety\nconst totalAnnual = clean(employee.leave_total_allocated);\nconst totalSick = clean(employee.sick_days_entitled);\n\n// 🧮 Load current leave stats\nlet leaveTaken = clean(employee.leave_taken);\nlet sickTaken = clean(employee.sick_days_taken);\n\n// 🧠 Logic path flags\nconst isApproved = status === STATUS.APPROVED;\nconst isSickLeave = leaveType === LEAVE_TYPES.SICK;\n\n// 🚨 Anomaly detection log\nconst anomalies = [];\n\nif (isApproved && numberOfDays <= 0) {\n  anomalies.push(\"Approved leave with zero or negative numberOfDays\");\n}\n\nif (!employee.employeeID || (totalAnnual <= 0 && totalSick <= 0)) {\n  anomalies.push(\"Missing or invalid employee entitlements\");\n}\n\n// 🔐 Business rule enforcement toggle\nconst isBlocked = anomalies.length > 0;\n\n// 🔁 Apply leave deductions only on clean approvals\nif (isApproved && !isBlocked) {\n  if (isSickLeave) {\n    sickTaken += numberOfDays;\n  } else {\n    leaveTaken += numberOfDays;\n  }\n}\n\n// 🔄 Final calculations with floor protection\nconst leaveBalance = Math.max(0, totalAnnual - leaveTaken);\nconst sickLeft = Math.max(0, totalSick - sickTaken);\n\n// 📤 Final enriched, patch-safe, and auditable payload\nreturn [{\n  json: {\n    ...$json,\n    leave_taken: leaveTaken,\n    leave_balance: leaveBalance,\n    sick_days_taken: sickTaken,\n    sick_days_left: sickLeft,\n    calculated_at: new Date().toISOString(),\n    anomalies: anomalies.length ? anomalies : undefined,\n    patch_ready: !isBlocked,\n    patch_target: {\n      employeeID: employee.id || null,\n      fields: {\n        leave_taken: leaveTaken,\n        leave_balance: leaveBalance,\n        sick_days_taken: sickTaken,\n        sick_days_left: sickLeft\n      }\n    },\n    meta: {\n      source: \"leave-balance-engine\",\n      version: \"1.2.0\",\n      applied_by: \"auto-approval-system\",\n      logic_path: isApproved ? (isSickLeave ? \"approved/sick\" : \"approved/annual\") : \"non-approved\"\n    }\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1480,
+        -620
+      ],
+      "id": "6bd9f670-419e-4f11-b94a-2c823fc8650e",
+      "name": "Compute Leave Balances"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "efb3379c-0229-47fb-8f5d-3337f8fbb2fb",
+              "name": "leave_taken",
+              "value": "={{$node[\"Compute Leave Balances\"].json.leave_taken}}",
+              "type": "string"
+            },
+            {
+              "id": "7fc6e7fb-007e-43fd-8639-b3116c8527b1",
+              "name": "leave_balance",
+              "value": "={{$node[\"Compute Leave Balances\"].json.leave_balance}}",
+              "type": "string"
+            },
+            {
+              "id": "08fc5ff3-b0b4-4285-b23f-d5f34e581f24",
+              "name": "sick_days_taken",
+              "value": "={{$node[\"Compute Leave Balances\"].json.sick_days_taken}}",
+              "type": "string"
+            },
+            {
+              "id": "07175004-c71f-460e-9ff4-16c62c9b93de",
+              "name": "sick_days_left",
+              "value": "={{$node[\"Compute Leave Balances\"].json.sick_days_left}}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1280,
+        -620
+      ],
+      "id": "7f1dcacd-00ab-4f1e-92df-1a48022d0c53",
+      "name": "Prepare Balance Patch Payload",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://pocketbase:8090/api/collections/employees/records/{{$json.patch_target.employeeID}}\n\n\n\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"Authenticate PB Admin\"].json.token}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"leave_taken\": {{ $json.expand.employeeID.leave_taken }},\n\"leave_balance\": {{ $json.expand.employeeID.leave_balance }},\n\"sick_days_taken\": {{ $json.expand.employeeID.sick_days_taken }},\n\"sick_days_balance\": {{ $json.expand.employeeID.sick_days_balance }},\n\"sick_days_entitled\": {{ $json.expand.employeeID.sick_days_entitled }}\n\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1100,
+        -620
+      ],
+      "id": "037f01d2-f272-4f5d-9a1e-34c82395ad7b",
+      "name": "PATCH Employee Balances"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cebd9f96-5798-4b04-83bc-6c6cd9ae1a36",
+              "name": "numberOfDays ",
+              "value": "={{ $node[\"Prepare Balance Patch Payload\"].json.numberOfDays }}\n",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -920,
+        -620
+      ],
+      "id": "980a740c-89a4-483d-9605-24a66d222b65",
+      "name": "Build LeaveRequest Approval Payload"
+    },
+    {
+      "parameters": {
+        "url": "=http://pocketbase:8090/api/collections/employees/records/{{ $json[\"employeeID\"] }}\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": " Authorization",
+              "value": "={{ $node[\"Authenticate PB Admin\"].json[\"token\"] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -500,
+        -620
+      ],
+      "id": "c4817db5-da3a-4adb-b477-7f69aec601b4",
+      "name": "Fetch Employee Email Address"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ed20791a-782c-44e7-8379-68029f1cb46c",
+              "name": "email",
+              "value": "={{$json.email}}",
+              "type": "string"
+            },
+            {
+              "id": "9eef59e7-8184-46b6-81a3-82743061c261",
+              "name": "fullName",
+              "value": "={{$json.fullName}}",
+              "type": "string"
+            },
+            {
+              "id": "30803c6c-624c-4fd4-8dfd-d51a2f2a83d6",
+              "name": "startDate",
+              "value": "={{$node[\"PATCH Update Leave Request Days\"].json.startDate.split(\"T\")[0]}}",
+              "type": "string"
+            },
+            {
+              "id": "b6e490cb-25ab-4060-898a-9838efb76dbf",
+              "name": "endDate",
+              "value": "={{$node[\"PATCH Update Leave Request Days\"].json.endDate.split(\"T\")[0]}}",
+              "type": "string"
+            },
+            {
+              "id": "3d2bc52f-2ef6-4463-9d37-bf1cfaee96f5",
+              "name": "leaveType",
+              "value": "={{$node[\"PATCH Update Leave Request Days\"].json.leaveType}}",
+              "type": "string"
+            },
+            {
+              "id": "7727011f-96cf-4320-87bf-a69989e8eb7f",
+              "name": "numberOfDays",
+              "value": "={{$node[\"PATCH Update Leave Request Days\"].json.numberOfDays}}",
+              "type": "string"
+            },
+            {
+              "id": "5a642220-ce1c-442b-a177-6a77c60832fe",
+              "name": "status",
+              "value": "={{$node[\"PATCH Update Leave Request Days\"].json.status}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -300,
+        -620
+      ],
+      "id": "1452c403-9b8a-4edd-817a-46ed30d35b1c",
+      "name": "Build Email Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\n\nconst start = new Date(item.startDate);\nconst end = new Date(item.endDate);\n\nconst formatDate = (d) =>\n  d.toLocaleDateString(\"en-US\", {\n    weekday: \"short\",\n    year: \"numeric\",\n    month: \"short\",\n    day: \"numeric\",\n  });\n\nconst message = `Hi ${item.fullName},\\n\\nYour leave request from ${formatDate(\n  start\n)} to ${formatDate(end)} has been approved.\\n\\nType: ${item.leaveType}\\nTotal Days: ${item.numberOfDays}\\nStatus: ${item.status}`;\n\nreturn [\n  {\n    json: {\n      email: item.email,\n      subject: \"Your Leave Request Has Been Approved ✅\",\n      message,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        -620
+      ],
+      "id": "ccd84e78-c4ad-430c-9062-214759d9b969",
+      "name": "Format Leave Approved Email"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.email }}\n\n",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "={{ $json.message }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        80,
+        -620
+      ],
+      "id": "7b89d759-1555-4e2c-934d-0e03bad49fda",
+      "name": "Send Email: Leave Approval Notice",
+      "webhookId": "1af168c9-bf8a-4341-857f-90667ef99957",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "Mk09V0YpVtoWRdJf",
+          "name": "Leave Request related Auths"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <title>Leave Approved</title>\n    <meta charset=\"UTF-8\">\n    <meta name=\"robots\" content=\"noindex, nofollow\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; style-src 'self' 'unsafe-inline';\">\n    <meta http-equiv=\"X-Content-Type-Options\" content=\"nosniff\">\n    <style>\n      body {\n        background: #f7fff7;\n        color: #333;\n        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;\n        text-align: center;\n        margin-top: 10vh;\n        padding: 0 1rem;\n      }\n      .emoji {\n        font-size: 3rem;\n        margin-bottom: 1rem;\n      }\n      main {\n        max-width: 420px;\n        margin: auto;\n      }\n    </style>\n  </head>\n  <body>\n    <main>\n      <div class=\"emoji\" aria-label=\"checkmark\">✅</div>\n      <h2>Leave Approved Successfully</h2>\n      <p>This tab may now be closed.</p>\n    </main>\n  </body>\n</html>\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.3,
+      "position": [
+        260,
+        -620
+      ],
+      "id": "cb81efae-e253-432c-a61f-f0b0f5c36b54",
+      "name": "Return Approval Success"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leave-request-received",
+        "authentication": "basicAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2860,
+        -1760
+      ],
+      "id": "84329599-d5ba-4666-bf7c-6ee399b3c41a",
+      "name": "Webhook: Submit Leave Request",
+      "webhookId": "a6efbb79-dc72-4e7b-a188-aebae1fa4232",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "nWXGADZCI3k0N28K",
+          "name": "n8n Basic Auth for Webhook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cef0e68d-e85a-4037-998c-1304371435d5",
+              "name": "recordId",
+              "value": "={{ $node[\"Webhook: Submit Leave Request\"].json[\"body\"][\"recordId\"] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2560,
+        -1880
+      ],
+      "id": "e48f903b-3fa8-450f-b688-a24ef4ab7bca",
+      "name": "Set: Initial Request Data"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -2320,
+        -1780
+      ],
+      "id": "09b962bc-ac83-4f48-b2fd-341f7c1b4bb0",
+      "name": "Merge: Auth + Form Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d732be8d-0202-456b-aed2-c4187bffae99",
+              "name": "employeeID ",
+              "value": "={{$json.expand.employeeID.employeeID}}",
+              "type": "string"
+            },
+            {
+              "id": "759943f1-13a4-4ec8-889f-ee017ba7d207",
+              "name": "id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "54f144e3-81e7-492f-bf6c-4e1301ceadb6",
+              "name": "startDate",
+              "value": "={{ $json.startDate }}",
+              "type": "string"
+            },
+            {
+              "id": "44d49f1c-be0d-4194-aee6-6f49f20446c9",
+              "name": "endDate",
+              "value": "={{ $json.endDate }}",
+              "type": "string"
+            },
+            {
+              "id": "2c0be208-00af-4f82-9f12-cd03077ac6fb",
+              "name": "leaveType",
+              "value": "={{ $json.leaveType }}",
+              "type": "string"
+            },
+            {
+              "id": "0fbef24d-a683-4a83-91b7-01831255d288",
+              "name": "numberOfDays",
+              "value": "={{ $json.numberOfDays }}",
+              "type": "string"
+            },
+            {
+              "id": "5fecb38b-88dc-4746-9bba-9fedecc66c92",
+              "name": "employeeRecordId",
+              "value": "={{$json.expand.employeeID.id}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1940,
+        -1780
+      ],
+      "id": "540f4376-1b06-4e1e-877e-344646b63fb6",
+      "name": "Prepare: Leave Form Payload",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        -1800,
+        -1520
+      ],
+      "id": "6ae17cb2-3c56-4c42-bb8b-8e2bb7e419cf",
+      "name": "Merge: Leave + Emp Info",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f7d4452b-2b15-43ee-abbe-f07b5edbcdc3",
+              "name": "id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "e1a2b720-4d5d-46cd-a8f9-4653563a7da0",
+              "name": "employeeID",
+              "value": "={{ $json.employeeID }}",
+              "type": "string"
+            },
+            {
+              "id": "17b6040e-845a-4f38-a8ea-7bfadb6a3559",
+              "name": "startDate",
+              "value": "={{ $json.startDate }}",
+              "type": "string"
+            },
+            {
+              "id": "f9da1393-86b0-4c11-8f8e-c43596d03283",
+              "name": "endDate",
+              "value": "={{ $json.endDate }}",
+              "type": "string"
+            },
+            {
+              "id": "995af08a-b764-427c-a150-ba79b2a160b8",
+              "name": "numberOfDays",
+              "value": "={{ $json.numberOfDays }}",
+              "type": "string"
+            },
+            {
+              "id": "670ca89e-7400-407a-adc5-ee429533470d",
+              "name": "status",
+              "value": "pending",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -260,
+        -1280
+      ],
+      "id": "5b21e6a1-8bcb-4563-8e0e-15cd4c031ad0",
+      "name": "Prepare: Conflict Email to Employee",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        -740,
+        -1060
+      ],
+      "id": "9fa8e7fe-2eb4-4f96-9472-8d48acc6dc58",
+      "name": "Merge: Cleaned Leave + Raw",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "68f66a45-2865-472f-b57f-b1905dc0ec4d",
+              "name": "leave_balance",
+              "value": "={{$json.leave_balance}}",
+              "type": "string"
+            },
+            {
+              "id": "af14dc64-0706-4c2d-9dd5-52e51d2ec658",
+              "name": "leave_taken",
+              "value": "={{$json.leave_taken}}",
+              "type": "string"
+            },
+            {
+              "id": "8c4e8c01-5d8e-4fe2-bf62-e5afa3b0536b",
+              "name": "leave_total_allocated",
+              "value": "={{$json.leave_total_allocated}}",
+              "type": "string"
+            },
+            {
+              "id": "b054bb59-93bd-4f84-88d9-449bdd6a0c4a",
+              "name": "sick_days_taken",
+              "value": "={{$json.sick_days_taken}}",
+              "type": "string"
+            },
+            {
+              "id": "95e03aba-1846-48cb-b727-c67308285ec9",
+              "name": "sick_days_left",
+              "value": "={{$json.sick_days_left}}",
+              "type": "string"
+            },
+            {
+              "id": "a570761c-c433-43f0-8a82-8529dba9964b",
+              "name": "sick_days_entitled",
+              "value": "={{$json.sick_days_entitled}}",
+              "type": "string"
+            },
+            {
+              "id": "41c23a83-b9d7-4d43-a67e-e71e9368ff73",
+              "name": "numberOfDays",
+              "value": "={{$json.numberOfDays}}",
+              "type": "string"
+            },
+            {
+              "id": "c8c40907-8f19-43ed-8015-ac2d887a4611",
+              "name": "managerEmail",
+              "value": "={{ $json.managerEmail }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -560,
+        -1060
+      ],
+      "id": "71000a67-936d-4fe1-ac6b-05a8b9691a75",
+      "name": "Sanitize: Leave Fields",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2d60ef8d-7246-4c90-9750-8cd1bf6202bc",
+              "leftValue": "={{$json.isValid}}\n\n\n",
+              "rightValue": "={{ false }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "d1ce1d6e-81aa-4033-abef-cd52d3b23476",
+              "leftValue": "={{$json.isValid}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -220,
+        -1060
+      ],
+      "id": "2b49b4be-a1b6-4ed4-8483-074666c5c82b",
+      "name": "IF: Conflict Exists?",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  const validate = item.json;\n\n  const parseDate = (raw) => {\n    if (!raw) return 'N/A';\n    const date = new Date(raw);\n    return isNaN(date.getTime())\n      ? 'N/A'\n      : date.toLocaleDateString('en-US', {\n          year: 'numeric',\n          month: 'short',\n          day: 'numeric',\n        });\n  };\n\n  return {\n    json: {\n      employeeMongoId: validate.id ?? '',\n      employeeID: validate.employeeID ?? '',\n      fullName: validate.fullName ?? '',\n      email: validate.email ?? '',\n      managerEmail: validate.managerEmail ?? '',\n      leaveRequestId: validate.leaveRequestId || validate.id || 'unknown',\n      leaveType: validate.leaveType || 'Unspecified',\n      numberOfDays: validate.numberOfDays?.toString() ?? '0',\n      friendlyStart: parseDate(validate.startDate),\n      friendlyEnd: parseDate(validate.endDate),\n    },\n    pairedItem: index\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        -1080
+      ],
+      "id": "ad1bafc7-f051-46cc-b8b2-64d701e6f359",
+      "name": "Build: Email Content",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "44e8e6bd-9097-470a-8e10-a564dfff9526",
+              "name": "employeeMongoId",
+              "value": "={{ $json.employeeMongoId }}",
+              "type": "string"
+            },
+            {
+              "id": "08630598-c87c-4dba-a9c2-a56ac8febe52",
+              "name": "employeeID",
+              "value": "={{ $json.employeeID }}",
+              "type": "string"
+            },
+            {
+              "id": "40471b23-a18c-4e5a-9b89-d2ad315f97bf",
+              "name": "fullName",
+              "value": "={{ $json.fullName }}",
+              "type": "string"
+            },
+            {
+              "id": "9c871fc4-9aba-47c9-a96c-590bcc57669b",
+              "name": "email",
+              "value": "={{ $json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "bac9780e-2e2f-4080-a712-b0a837d25d02",
+              "name": "managerEmail",
+              "value": "={{ $json.managerEmail }}",
+              "type": "string"
+            },
+            {
+              "id": "c7eeffb6-cf3a-4db2-941e-d4163dd02228",
+              "name": "leaveType",
+              "value": "={{ $json.leaveType }}",
+              "type": "string"
+            },
+            {
+              "id": "2a783703-e812-4f33-811a-5d32380d8d36",
+              "name": "numberOfDays",
+              "value": "={{ $json.numberOfDays }}",
+              "type": "string"
+            },
+            {
+              "id": "8b9bf531-e8a8-4f9f-8608-86d58b7bb7b8",
+              "name": "friendlyStart",
+              "value": "={{ $json.friendlyStart }}",
+              "type": "string"
+            },
+            {
+              "id": "a9a0b2ea-0a92-4ec0-aa72-4c6a19576f08",
+              "name": "friendlyEnd",
+              "value": "={{ $json.friendlyEnd }}",
+              "type": "string"
+            },
+            {
+              "id": "e9d56760-444a-4d57-a0aa-261436a0f4f5",
+              "name": "leaveRequestId",
+              "value": "={{ $json.leaveRequestId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        200,
+        -1080
+      ],
+      "id": "ab0070c1-e37b-4246-ac7d-8b1aef1b5cd9",
+      "name": "Prepare: Notification Email",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  const json = item.json;\n\n  const parseDate = (raw) => {\n    if (!raw) return 'N/A';\n    const date = new Date(raw);\n    return isNaN(date.getTime())\n      ? 'N/A'\n      : date.toLocaleDateString('en-US', {\n          year: 'numeric',\n          month: 'short',\n          day: 'numeric',\n        });\n  };\n\n  return {\n    json: {\n      ...json,\n      friendlyStart: parseDate(json.startDate),\n      friendlyEnd: parseDate(json.endDate),\n    },\n    pairedItem: index,\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        60,
+        -920
+      ],
+      "id": "88d9f8ac-059f-449e-a737-16114b0c3b3b",
+      "name": "Build: Rejection Email Content",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.managerEmail }}",
+        "subject": "={{ $json.emailSubject }}\n\n",
+        "bodyContent": "={{ $json.emailMessage }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        720,
+        -920
+      ],
+      "id": "bbb81354-b99a-4b2c-b80c-ec5d4d637629",
+      "name": "Notify Manager to take Action",
+      "webhookId": "d0ea002e-fbdf-4b54-a618-49db186e9251",
+      "alwaysOutputData": true,
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "Mk09V0YpVtoWRdJf",
+          "name": "Leave Request related Auths"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": "={{ 30 }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2860,
+        -2420
+      ],
+      "id": "4e355ff3-5dcd-4bcd-baee-4af9744df3b2",
+      "name": "Poll Mailbox Every X Mins"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a5028649-a8a9-4123-bfdc-01032b6c905d",
+              "name": "status",
+              "value": "Schedule triggered",
+              "type": "string"
+            },
+            {
+              "id": "26574f05-02f4-42db-a649-163ac77ee1c2",
+              "name": "name",
+              "value": "triggered_at",
+              "type": "string"
+            },
+            {
+              "id": "a8ed4c92-8e70-4bb4-8364-d66fbdfebca9",
+              "name": "type",
+              "value": "String",
+              "type": "string"
+            },
+            {
+              "id": "a57b9f6c-66a8-4150-8953-bccfb48aa61e",
+              "name": "value",
+              "value": "={{$now}}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2680,
+        -2420
+      ],
+      "id": "647bc560-c3be-4e0b-96ee-42c616699794",
+      "name": "Set Mailbox Headers"
+    },
+    {
+      "parameters": {
+        "url": "https://graph.microsoft.com/v1.0/users/leave@niiosalabs.com/mailFolders/AAMkADUxMjExNDQ1LTc3OGQtNGIzMC1hNzQzLTRjNzE0MjhiYTI4ZQAuAAAAAAA2N2khCf1uRqukgnhJKlO-AQATskFjhitpTqZFkUKXDemFAAAXxgNNAAA=/messages?$filter=isRead eq false&$orderby=receivedDateTime desc&$top=1&$select=subject,body,from,toRecipients",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "microsoftOutlookOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2520,
+        -2420
+      ],
+      "id": "55e59efb-49d0-4e9a-9df0-a8bcc4617be5",
+      "name": "Fetch Unread Outlook Mails",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "yFowT72LcPUvbgTg",
+          "name": "Pocketbase Admin Login"
+        },
+        "microsoftOutlookOAuth2Api": {
+          "id": "u4SaBnKQmGSzpGN4",
+          "name": "Microsoft Graph related Auths"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1de1031d-f8ae-45fd-a14b-9da8bef8c24e",
+              "name": "email_id",
+              "value": "={{ $json[\"value\"][0][\"id\"] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2340,
+        -2420
+      ],
+      "id": "1b35429b-110e-401a-806a-730dc5ccb0a1",
+      "name": "Normalize Mail Metadata"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  const message = item.json?.value?.[0] || {};\n\n  const html = message.body?.content || '';\n  const safeText = typeof html === 'string' ? html : '';\n\n  const stripHtml = safeText\n    .replace(/<[^>]*>/g, '')           // Strip tags\n    .replace(/&nbsp;/gi, ' ')\n    .replace(/&amp;/gi, '&')\n    .replace(/&lt;/gi, '<')\n    .replace(/&gt;/gi, '>')\n    .replace(/&#39;/gi, \"'\")\n    .replace(/&quot;/gi, '\"')\n    .replace(/\\s+/g, ' ')              // Normalize whitespace\n    .trim();\n\n  const fromEmail = message.from?.emailAddress?.address || '';\n  const nameFromHeader = message.from?.emailAddress?.name || '';\n\n  // 👇 Derive name from email if no clean name is available\n  const inferNameFromEmail = (email) => {\n    const local = email.split('@')[0].replace(/\\d+/g, '').replace(/[_\\.]/g, ' ').trim();\n    return local\n      .split(' ')\n      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())\n      .join(' ');\n  };\n\n  const inferredName = fromEmail ? inferNameFromEmail(fromEmail) : '';\n  const senderName = nameFromHeader || inferredName;\n\n  return {\n    json: {\n      email_id: message.id || null,\n      subject: message.subject || '',\n      from_email: fromEmail,\n      sender_name: senderName,\n      email_to: message.toRecipients?.[0]?.emailAddress?.address || '',\n      email_senderName: senderName,\n      inferred_name: inferredName, // 🔍 for inspection/debugging (optional downstream use)\n      content: safeText,\n      body_text: stripHtml,\n      meta: {\n        parsed: true,\n        html_found: !!safeText,\n        html_length: safeText.length,\n        index\n      }\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2180,
+        -2460
+      ],
+      "id": "014264e8-aacb-45fa-b02c-385d22d25826",
+      "name": "Generate Clean Email Object"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pocketbase:8090/api/admins/auth-with-password",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"identity\": \"{{ $env.PB_ADMIN_EMAIL }}\",\n  \"password\": \"{{ $env.PB_ADMIN_PASSWORD }}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1980,
+        -2360
+      ],
+      "id": "47eb61e2-80db-45bd-af0b-7705a19c049d",
+      "name": "Authenticate to PocketBase"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        -1760,
+        -2440
+      ],
+      "id": "d7ce8237-6dea-4135-88d5-21f7013a3326",
+      "name": "Merge Email & Auth Payload"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1580,
+        -2120
+      ],
+      "id": "17a59a95-4cf4-45f3-9905-cb2b43743ebf",
+      "name": "Ignore Self-Sent Mails"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dbd90851-f708-4e9c-af38-a8d828aee2ad",
+              "name": "executionId",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "25348954-d5a6-4e87-93cb-2e586bde2d64",
+              "name": "executedAt",
+              "value": "={{$now}}",
+              "type": "string"
+            },
+            {
+              "id": "8c1218eb-b5e2-47db-83f9-e473e5d946f4",
+              "name": "content",
+              "value": "={{ $node[\"Normalized Email Fields\"].json.content }}",
+              "type": "string"
+            },
+            {
+              "id": "67397472-630a-4b62-bf10-fb6ae12c8286",
+              "name": "subject",
+              "value": "={{ $node[\"Normalized Email Fields\"].json[\"subject\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "f274961b-1c5e-4a88-855a-f00463506318",
+              "name": "from_email",
+              "value": "={{ $node[\"Normalized Email Fields\"].json[\"from_email\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "ceeb9301-422e-487b-a578-9252f0373ee9",
+              "name": "email_to",
+              "value": "={{ $node[\"Normalized Email Fields\"].json[\"email_to\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "144fedb5-3336-4372-9174-be8339f3a66e",
+              "name": "token",
+              "value": "={{$node[\"Authenticate to PocketBase\"].json.token}}",
+              "type": "string"
+            },
+            {
+              "id": "235e674a-0ded-4297-ae5f-a8a9117796b0",
+              "name": "email_id",
+              "value": "={{ $node[\"Normalized Email Fields\"].json[\"email_id\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "d6f06f3b-1dd2-4d8b-91a8-3997c538bbb5",
+              "name": "body_text",
+              "value": "={{ $node[\"Normalized Email Fields\"].json[\"body_text\"] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1380,
+        -2500
+      ],
+      "id": "fa8067b5-a6fc-4403-aeaf-644d9895e6a7",
+      "name": "Prepare AI Classifier Input"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a classification assistant. Read the subject and body of an email and determine the intent.\n\nRespond ONLY in this JSON format:\n{\n  \"intent\": \"leave_request\" | \"leave_query\" | \"other\"\n}\n\n---\n\nEmail Subject:\n{{ $json[\"subject\"] || \"\" }}\n\nEmail Body:\n{{ $json[\"content\"] || \"\" }}\n\n---\n\nClassification Rules:\n1. If the message is requesting time off, stating leave dates, or notifying planned absence, classify as \"leave_request\".\n   - Examples: “I’ll be off next week”, “Going on vacation”, “Leave from 5th to 10th”\n   - Covers: leave, vacation, holiday, sick, out of office, time off, travel, rest, maternity, sabbatical, urgent personal leave\n\n2. If the message is asking about leave balances, remaining days, policies, or entitlements, classify as \"leave_query\".\n   - Examples: “How many days do I have left?”, “Can I take sick leave?”, “Do I have unused vacation?”, “Query about sick days”\n\n3. If unrelated to leave (e.g. payroll, birthday, announcements), classify as \"other\".\n\n❗ DO NOT guess. If unsure, classify as \"other\".\n\nReturn ONLY the JSON. No extra text.\n",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -2500
+      ],
+      "id": "89127f21-6bcb-45d4-acf7-db2374c1bbca",
+      "name": "Classify Email Intent (AI)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "531a0bcc-26c7-4b3f-8699-b4b5a900fff9",
+              "name": "intent",
+              "value": "={{ ($json.output.intent || \"\").trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "219a997a-bdb8-4a18-b479-07d6094b03dc",
+              "name": "subject",
+              "value": "={{ ($node[\"Prepare AI Classifier Input\"].json.subject || \"\").trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "00575de1-6aaf-4cd8-8b17-574da1eaed79",
+              "name": "from",
+              "value": "={{ $node[\"Normalized Email Fields\"].json[\"from_email\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "4ae83d90-0d27-445f-ae22-81acbc412259",
+              "name": "to",
+              "value": "={{ (() => ($node[\"Prepare AI Classifier Input\"].json.email_to || \"\").trim())() }}",
+              "type": "string"
+            },
+            {
+              "id": "44f46e53-3d1d-4e5c-b61d-c7af2aefa3ef",
+              "name": "content",
+              "value": "={{ ($node[\"Prepare AI Classifier Input\"].json.content || \"\").trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "a2649619-cc2b-4a2e-be07-c7ffad8056b0",
+              "name": "token",
+              "value": "={{ ($node[\"Authenticate to PocketBase\"].json.token || \"\").trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "83f8d438-8a41-4034-9165-29e19f937d11",
+              "name": "executionId",
+              "value": "={{ $node[\"Prepare AI Classifier Input\"].json.executionId }}",
+              "type": "string"
+            },
+            {
+              "id": "0d73ffa5-0b9f-49a1-b11a-b3f9cd99d0df",
+              "name": "executedAt",
+              "value": "={{ $node[\"Prepare AI Classifier Input\"].json.executedAt }}",
+              "type": "string"
+            },
+            {
+              "id": "fdab4995-238b-4f76-bd5e-42f8cff9f3c3",
+              "name": "email_id",
+              "value": "={{ $node[\"Normalized Email Fields\"].json[\"email_id\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "6e502e2f-9bd5-44ba-a098-8493440313fa",
+              "name": "body_text",
+              "value": "={{ $node[\"Normalized Email Fields\"].json[\"body_text\"] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -900,
+        -2500
+      ],
+      "id": "a60f4158-2172-4314-8d14-04c3a0ab78e3",
+      "name": "Process Classifier Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "93bd3e0b-7385-4737-a79e-665921545f8a",
+              "leftValue": "={{ $json.from }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "9d44176a-7daf-4ddf-bf05-4609f3d808a0",
+              "leftValue": "Does Not Equal",
+              "rightValue": "null",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -700,
+        -2240
+      ],
+      "id": "c7f4f44f-d8f6-4457-a8e4-611a3a88bef5",
+      "name": "Check for Invalid Intent"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.from }}",
+        "subject": "Re: We couldn’t understand your request",
+        "bodyContent": "Hi, we couldn’t identify the nature of your request. Please contact HR directly for assistance.\n\nBest regards,  \nHR Assistant\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        -700,
+        -2040
+      ],
+      "id": "1ade886c-0554-45d0-8cf4-240ce0767db0",
+      "name": "Send: Sorry, Couldn’t Understand",
+      "webhookId": "aab007ce-65c8-49d7-949c-918fab3d7fc4",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "K5hz5M0OK4G2gBam",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a precise and silent JSON extraction assistant. Given an email's body and sender details, extract structured leave request information.\n\n📨 Email Body:\n{{ $json[\"bodyPreview\"] || $json[\"content\"] || \"\" }}\n\n✉️ Sender Email:\n{{ $json[\"from\"] || $json[\"email_from\"] || $json[\"email\"] || \"unknown\" }}\n\n---\n\nRespond **only** with this exact JSON format (no extra text or commentary):\n\n{\n  \"name\": \"\",         // Full name if mentioned, else infer from email (e.g., john.smith@ → \"John Smith\")\n  \"leaveType\": \"\",    // Choose from: \"Annual\", \"Sick\", \"Casual\", \"Maternity\"\n  \"startDate\": \"\",    // Format: YYYY-MM-DD\n  \"endDate\": \"\",      // Format: YYYY-MM-DD\n  \"from\": \"\"          // Always provide sender email or \"unknown\"\n}\n\n---\n\n🧠 Extraction Rules:\n1. **Do NOT guess** or assume values — if something is missing or ambiguous, leave it as an empty string.\n2. Convert all dates to **YYYY-MM-DD**. If no year is given, assume current year.\n3. If name not in body, derive from email prefix:\n   - \"alice.morris@abc.com\" → \"Alice Morris\"\n   - \"daniel@xyz.com\" → \"Daniel\"\n4. **Capitalize inferred names properly**. Never output malformed casing like \"OfEor\" — use \"Ofeor\".\n5. **Always** return all 5 fields, exactly as defined.\n6. Only valid leave types are accepted (Annual, Sick, Casual, Maternity). Otherwise, leave blank.\n7. If inferring name from email, use lowercase → capitalize each part (e.g., \"john.doe@abc.com\" → \"John Doe\").\n8. Do not output anything except the JSON.\n\n---\n\nFailing any rule must result in the value being `\"\"` — never invent.\n",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [
+        -420,
+        -2480
+      ],
+      "id": "c96db1d8-7099-478a-b624-a12f73a8d6b0",
+      "name": "AI Agent: Compose Leave Request Reply"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json.output || item.json;\n  let error = null;\n\n  const required = [\"name\", \"leaveType\", \"startDate\", \"endDate\"];\n  const allowedLeaveTypes = [\"Annual\", \"Sick\", \"Casual\", \"Maternity\"];\n\n  // Normalize leaveType (e.g. \"annual\" → \"Annual\")\n  if (typeof data.leaveType === \"string\") {\n    data.leaveType = data.leaveType.charAt(0).toUpperCase() + data.leaveType.slice(1).toLowerCase();\n  }\n\n  // Check for missing or blank values\n  const missing = required.filter(k => {\n    const value = data[k];\n    return (\n      typeof value !== \"string\" ||\n      value.trim() === \"\"\n    );\n  });\n\n  // Regex date format check (YYYY-MM-DD)\n  const datePattern = /^\\d{4}-\\d{2}-\\d{2}$/;\n  const badDateFormat = [\"startDate\", \"endDate\"].filter(k => {\n    const value = data[k];\n    return typeof value === \"string\" && value.trim() !== \"\" && !datePattern.test(value);\n  });\n\n  const invalidLeaveType = data.leaveType && !allowedLeaveTypes.includes(data.leaveType);\n\n  const fromEmail =\n    data.from ||\n    item.json.output?.from ||\n    item.json.from ||\n    item.json.email_from ||\n    item.json.admin?.email ||\n    \"unknown\";\n\n  const allEmpty = required.every(k => {\n    const v = data[k];\n    return typeof v !== \"string\" || v.trim() === \"\";\n  });\n\n  if (allEmpty) {\n    error = `No recognizable leave request details found.`;\n  } else if (missing.length > 0) {\n    error = `Missing required fields: ${missing.join(\", \")}`;\n  } else if (badDateFormat.length > 0) {\n    error = `Invalid date format in: ${badDateFormat.join(\", \")}. Use YYYY-MM-DD.`;\n  } else if (invalidLeaveType) {\n    error = `Invalid leave type: ${data.leaveType}`;\n  }\n\n  return {\n    json: {\n      ...data,\n      error,\n      isValid: error === null,\n      from: fromEmail\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        -2460
+      ],
+      "id": "3e65159d-578a-4741-961a-2a003e01018d",
+      "name": "Validate & Normalize Incoming Leave Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6eb02c84-0682-467a-af89-f9c9ee28228e",
+              "leftValue": "={{$json.isValid}}",
+              "rightValue": "=true",
+              "operator": {
+                "type": "boolean",
+                "operation": "exists",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "eef523bb-8a68-418b-bbd4-3dfe680867d8",
+              "leftValue": "={{$json.isValid}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        180,
+        -2460
+      ],
+      "id": "c437997b-3124-44fa-8a96-92957149c7a2",
+      "name": "Is Submission Valid?"
+    },
+    {
+      "parameters": {
+        "url": "http://pocketbase:8090/api/collections/employees/records",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter",
+              "value": "=email=\"{{ $json[\"from\"] }}\"\n\n"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\n  \"Authorization\": \"Bearer {{ $node['Authenticate to PocketBase'].json.token }}\",\n  \"Content-Type\": \"application/json\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        420,
+        -2480
+      ],
+      "id": "8c61ee8d-1681-4145-b41f-e4a24fe05860",
+      "name": "Fetch Employee Record by Email"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "902674a6-28f3-4067-a98b-8a6ca2cbc2e3",
+              "name": "employeeID",
+              "value": "={{ $node['Fetch Employee Record by Email'].json.items[0].id }}",
+              "type": "string"
+            },
+            {
+              "id": "2180b035-c58e-46ab-beb7-e96fdbf7c0a2",
+              "name": "email",
+              "value": "={{ $node['Fetch Employee Record by Email'].json.items[0].email }}",
+              "type": "string"
+            },
+            {
+              "id": "b01c962a-3fe0-484c-8b19-8d7ea8bfdf8d",
+              "name": "fullName",
+              "value": "={{ $node['Fetch Employee Record by Email'].json.items[0].fullName }}",
+              "type": "string"
+            },
+            {
+              "id": "ba795a79-2924-43cb-978f-b8d9d3db607a",
+              "name": "managerEmail",
+              "value": "={{ $node['Fetch Employee Record by Email'].json.items[0].managerEmail }}",
+              "type": "string"
+            },
+            {
+              "id": "049e2cf0-c54b-4862-822c-cae44925f294",
+              "name": "leaveType",
+              "value": "={{ $node[\"Is Submission Valid?\"].json[\"leaveType\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "7505bf57-5e20-421c-be02-1002918b2f1d",
+              "name": "startDate",
+              "value": "={{ $node[\"Is Submission Valid?\"].json[\"startDate\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "a67ce007-7435-46f2-9804-9d040459e24a",
+              "name": "endDate",
+              "value": "={{ $node[\"Is Submission Valid?\"].json[\"endDate\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "c02d9ffa-b4f8-44f5-a75e-b048c009a13e",
+              "name": "token ",
+              "value": "={{ $node[\"Authenticate to PocketBase\"].json[\"token\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "c7db0761-dd59-498c-b443-d41b74572e3e",
+              "name": "email_id",
+              "value": "={{ $node[\"Normalized Email Fields\"].json[\"email_id\"] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        640,
+        -2480
+      ],
+      "id": "9d0ced6b-8e4b-46d4-8997-75ed8090e599",
+      "name": "Prepare Leave Submission Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pocketbase:8090/api/collections/LeaveRequests/records",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\n  \"Authorization\": \"Bearer {{ $node['Authenticate to PocketBase'].json.token }}\",\n  \"Content-Type\": \"application/json\"\n}\n",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"employeeID\": \"{{ $json['employeeID'] }}\",\n  \"leaveType\": \"{{ $json['leaveType'] }}\",\n  \"startDate\": \"{{ $json['startDate'] }}T00:00:00.000Z\",\n  \"endDate\": \"{{ $json['endDate'] }}T00:00:00.000Z\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        -2480
+      ],
+      "id": "c144c607-72d0-4a42-a4cf-bb21b0b3015d",
+      "name": "Submit Leave Request to DB"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://graph.microsoft.com/v1.0/users/leave@niiosalabs.com/messages/{{ $node['Normalized Email Fields'].json.email_id }}\n\n",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "microsoftOutlookOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"isRead\": true\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        -2480
+      ],
+      "id": "9ecbf8c3-c072-43be-8b8e-8d2decbeccf0",
+      "name": "Mark Source Email as Read",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "u4SaBnKQmGSzpGN4",
+          "name": "Microsoft Graph related Auths"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $node[\"Normalized Email Fields\"].json[\"from_email\"] }}",
+        "subject": "Incomplete Leave Request Submission",
+        "bodyContent": "=Dear {{ $json.name || \"Employee\" }},\n\nWe received your recent leave request. However, it appears that the following issues need to be resolved before we can process it.\n\n{{ $json.error }}\n\nPlease ensure all required details — full name, leave type (Annual, Sick, Casual, or Maternity), start date, and end date — are correctly included.\n\nOnce you've updated the information, feel free to resend your request.\n\nWarm regards,  \nHR Team\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        420,
+        -2260
+      ],
+      "id": "088b95c9-4dd8-49ba-b101-8e31dbda3fbe",
+      "name": "Send Email: Submission Incomplete Notification",
+      "webhookId": "902a6e2f-5508-4052-aac3-bf2a37b26b99",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "Mk09V0YpVtoWRdJf",
+          "name": "Leave Request related Auths"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://pocketbase:8090/api/collections/employees/records",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\n  \"Authorization\": \"Bearer {{ $json.token }}\"\n}\n\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -220,
+        -1800
+      ],
+      "id": "01995495-6a2c-4aba-b104-3d3f669dbbcd",
+      "name": "Fetch Employee Record by ID"
+    },
+    {
+      "parameters": {
+        "url": "http://pocketbase:8090/api/collections/leaverequests/records",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\n  \"Authorization\": \"Bearer {{ $json.token }}\"\n}\n\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -40,
+        -1800
+      ],
+      "id": "c9bd57c4-3a7b-40d8-b79d-cd8036e3b7c8",
+      "name": "Fetch Leave Request Record by ID"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "🔹 Send Email: Notify Employee": {
+      "main": [
+        []
+      ]
+    },
+    "Prepare Leave Request Data": {
+      "main": [
+        [
+          {
+            "node": "Calculate Leave Duration",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge: Cleaned Leave + Raw",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Validate Leave Request": {
+      "main": [
+        [
+          {
+            "node": "IF: Conflict Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Leave Duration": {
+      "main": [
+        [
+          {
+            "node": "Set Leave Request ID and Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Leave Request ID and Days": {
+      "main": [
+        [
+          {
+            "node": "Create Leave Request (Initial Submission)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conflict Checker": {
+      "main": [
+        [
+          {
+            "node": "Prepare: Conflict Email to Employee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔹 Send Rejected Email: Employee": {
+      "main": [
+        []
+      ]
+    },
+    "Get Employee Data": {
+      "main": [
+        [
+          {
+            "node": "Merge: Leave + Emp Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PATCH Update Leave Request Days": {
+      "main": [
+        [
+          {
+            "node": "Fetch Employee Email Address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PocketBase: Admin Login": {
+      "main": [
+        [
+          {
+            "node": "Merge: Auth + Form Fields",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Create Leave Request (Initial Submission)": {
+      "main": [
+        [
+          {
+            "node": "Merge: Leave + All Records",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⏱ Wait for Save",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge: Leave + All Records": {
+      "main": [
+        [
+          {
+            "node": "Conflict Checker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch All Active Leaves": {
+      "main": [
+        [
+          {
+            "node": "Merge: Leave + All Records",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "⏱ Wait for Save": {
+      "main": [
+        [
+          {
+            "node": "Fetch All Active Leaves",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Manager Email Content": {
+      "main": [
+        [
+          {
+            "node": "Notify Manager to take Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent: Compose Leave Request Reply",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent: Compose Leave Request Reply",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent: Compose Leave Request Reply",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classifier Chat Model (gpt-4o-mini)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classify Email Intent (AI)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Leave Enquiry AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leave Enquiry AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Router": {
+      "main": [
+        [
+          {
+            "node": "AI Agent: Compose Leave Request Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Leave Enquiry AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check for Invalid Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Leave Enquiry AI Agent1",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields7": {
+      "main": [
+        [
+          {
+            "node": "Send Leave Query Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Approve Leave": {
+      "main": [
+        [
+          {
+            "node": "Extract Approve Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Employee: Leave Rejected": {
+      "main": [
+        [
+          {
+            "node": "Return Rejection Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "Leave Enquiry AI Agent1",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Not From Self": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Classifier Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignore Self-Sent Mails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser2": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Classify Email Intent (AI)",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalized Email Fields": {
+      "main": [
+        [
+          {
+            "node": "Merge Email & Auth Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Leave Record": {
+      "main": [
+        [
+          {
+            "node": "Prepare: Leave Form Payload",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge: Leave + Emp Info",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "RejectWebhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Reject Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Reject Params": {
+      "main": [
+        [
+          {
+            "node": "Admin Auth (Token)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Admin Auth (Token)": {
+      "main": [
+        [
+          {
+            "node": "PB Auth Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PB Auth Request": {
+      "main": [
+        [
+          {
+            "node": "Prepare Reject Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Reject Patch": {
+      "main": [
+        [
+          {
+            "node": "Patch Leave as Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch Leave as Rejected": {
+      "main": [
+        [
+          {
+            "node": "Notify Employee: Leave Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Approve Params": {
+      "main": [
+        [
+          {
+            "node": "Authenticate PB Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticate PB Admin": {
+      "main": [
+        [
+          {
+            "node": "Fetch Leave Request (PB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Leave Request (PB)": {
+      "main": [
+        [
+          {
+            "node": "Build Approval Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Approval Payload": {
+      "main": [
+        [
+          {
+            "node": "Fetch Employee Leave Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Employee Leave Summary": {
+      "main": [
+        [
+          {
+            "node": "Compute #Days Requested",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute #Days Requested": {
+      "main": [
+        [
+          {
+            "node": "Compute Leave Balances",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Leave Balances": {
+      "main": [
+        [
+          {
+            "node": "Prepare Balance Patch Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Balance Patch Payload": {
+      "main": [
+        [
+          {
+            "node": "PATCH Employee Balances",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PATCH Employee Balances": {
+      "main": [
+        [
+          {
+            "node": "Build LeaveRequest Approval Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LeaveRequest Approval Payload": {
+      "main": [
+        [
+          {
+            "node": "PATCH Update Leave Request Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Employee Email Address": {
+      "main": [
+        [
+          {
+            "node": "Build Email Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email Fields": {
+      "main": [
+        [
+          {
+            "node": "Format Leave Approved Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Leave Approved Email": {
+      "main": [
+        [
+          {
+            "node": "Send Email: Leave Approval Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email: Leave Approval Notice": {
+      "main": [
+        [
+          {
+            "node": "Return Approval Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Submit Leave Request": {
+      "main": [
+        [
+          {
+            "node": "Set: Initial Request Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "PocketBase: Admin Login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Initial Request Data": {
+      "main": [
+        [
+          {
+            "node": "Merge: Auth + Form Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge: Auth + Form Fields": {
+      "main": [
+        [
+          {
+            "node": "Fetch Leave Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare: Leave Form Payload": {
+      "main": [
+        [
+          {
+            "node": "Get Employee Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge: Leave + Emp Info": {
+      "main": [
+        [
+          {
+            "node": "Prepare Leave Request Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare: Conflict Email to Employee": {
+      "main": [
+        [
+          {
+            "node": "Merge: Cleaned Leave + Raw",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge: Cleaned Leave + Raw": {
+      "main": [
+        [
+          {
+            "node": "Sanitize: Leave Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize: Leave Fields": {
+      "main": [
+        [
+          {
+            "node": "Validate Leave Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Conflict Exists?": {
+      "main": [
+        [
+          {
+            "node": "Build: Email Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build: Rejection Email Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: Email Content": {
+      "main": [
+        [
+          {
+            "node": "Prepare: Notification Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare: Notification Email": {
+      "main": [
+        [
+          {
+            "node": "🔹 Send Email: Notify Employee",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format Manager Email Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: Rejection Email Content": {
+      "main": [
+        [
+          {
+            "node": "🔹 Send Rejected Email: Employee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Manager to take Action": {
+      "main": [
+        []
+      ]
+    },
+    "Poll Mailbox Every X Mins": {
+      "main": [
+        [
+          {
+            "node": "Set Mailbox Headers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Mailbox Headers": {
+      "main": [
+        [
+          {
+            "node": "Fetch Unread Outlook Mails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Unread Outlook Mails": {
+      "main": [
+        [
+          {
+            "node": "Normalize Mail Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Mail Metadata": {
+      "main": [
+        [
+          {
+            "node": "Generate Clean Email Object",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Clean Email Object": {
+      "main": [
+        [
+          {
+            "node": "Authenticate to PocketBase",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Normalized Email Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticate to PocketBase": {
+      "main": [
+        [
+          {
+            "node": "Merge Email & Auth Payload",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Email & Auth Payload": {
+      "main": [
+        [
+          {
+            "node": "IF Not From Self",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ignore Self-Sent Mails": {
+      "main": [
+        []
+      ]
+    },
+    "Prepare AI Classifier Input": {
+      "main": [
+        [
+          {
+            "node": "Classify Email Intent (AI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Email Intent (AI)": {
+      "main": [
+        [
+          {
+            "node": "Process Classifier Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Classifier Result": {
+      "main": [
+        [
+          {
+            "node": "Intent Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Invalid Intent": {
+      "main": [
+        [
+          {
+            "node": "Send: Sorry, Couldn’t Understand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent: Compose Leave Request Reply": {
+      "main": [
+        [
+          {
+            "node": "Validate & Normalize Incoming Leave Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Normalize Incoming Leave Request": {
+      "main": [
+        [
+          {
+            "node": "Is Submission Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Submission Valid?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Employee Record by Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Email: Submission Incomplete Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Employee Record by Email": {
+      "main": [
+        [
+          {
+            "node": "Prepare Leave Submission Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Leave Submission Payload": {
+      "main": [
+        [
+          {
+            "node": "Submit Leave Request to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Leave Request to DB": {
+      "main": [
+        [
+          {
+            "node": "Mark Source Email as Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Source Email as Read": {
+      "main": [
+        []
+      ]
+    },
+    "Fetch Employee Record by ID": {
+      "ai_tool": [
+        [
+          {
+            "node": "Leave Enquiry AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Leave Request Record by ID": {
+      "ai_tool": [
+        [
+          {
+            "node": "Leave Enquiry AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "444dd2eb-aeed-4df1-b811-c8145e72aab2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a9a0b453fc20f58463bff54136b8d831aaa7479c2b4c23aedf48d9c8f536b221"
+  },
+  "id": "vTDdSabSglJQoncK",
+  "tags": []
+}
