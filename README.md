@@ -317,3 +317,32 @@ Health Monitoring
 ![Manager Approval](examples/manager-approval-workflow.png)
 ![Rejection Logic](examples/rejection-handling-logic.png)
 ![AI Email Agent](examples/ai-email-agent-flow.png)
+
+
+## Contributing
+
+We welcome contributions to improve this Leave Automation Platform!
+
+Local Dev Setup
+To spin up a local version:
+
+```bash
+docker-compose -f docker-compose.demo.yml --env-file .env.demo up -d
+
+
+Typical Contribution Workflow
+
+
+# Clone your fork
+git clone https://github.com/your-username/n8n-automation.git
+cd n8n-automation
+
+# Create a feature branch
+git checkout -b fix/your-feature-name
+
+# Make changes, commit, push
+git add .
+git commit -m "Describe your change"
+git push origin fix/your-feature-name
+
+
